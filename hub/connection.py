@@ -7,14 +7,14 @@ from bleak import BleakScanner, BleakClient
 PORT = 5000
 TIMEOUT = 6 
 CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-WIFI_DATA = "gallocasa:PiggyBarf247"
+WIFI_DATA = "WiFi address:password" #Fill in for respective WiFi
 
 # Registry to be shared with mainsim.py
 device_registry = {}
 registry_lock = threading.Lock()
 
 async def pair_new_base(code, custom_name):
-    """FR10: BLE Pairing with handover error handling"""
+    """BLE Pairing with handover error handling"""
     print(f"Scanning for Base {code}...")
     devices = await BleakScanner.discover(timeout=5.0)
     target = next((d for d in devices if d.name == code), None)
@@ -25,7 +25,6 @@ async def pair_new_base(code, custom_name):
                 await client.write_gatt_char(CHAR_UUID, WIFI_DATA.encode())
                 await asyncio.sleep(1.0) # Wait for radio handover
         except Exception as e:
-            # Ignore disconnect errors during the ESP32 radio reset
             print(f"Handover finished (Note: {e})")
         
         with registry_lock:
@@ -40,9 +39,8 @@ async def pair_new_base(code, custom_name):
     return False
 
 def socket_watchdog():
-    """FR3/FR4: Heartbeat Monitoring & Command Forwarding"""
+    """Heartbeat Monitoring"""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # THE FIX: Allow immediate reuse of the port
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
         s.bind(('0.0.0.0', PORT))
@@ -67,7 +65,7 @@ def socket_watchdog():
                                 else:
                                     conn.sendall(b"ACK_OK")
             except socket.timeout:
-                # FR3: Watchdog timeout check
+                # Watchdog timeout check
                 with registry_lock:
                     now = time.time()
                     for name, info in device_registry.items():
