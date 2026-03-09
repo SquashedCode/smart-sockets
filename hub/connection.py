@@ -1,3 +1,4 @@
+# Handles wireless connection in the system and Safe Mode
 import socket
 import time
 import threading
