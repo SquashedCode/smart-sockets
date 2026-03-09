@@ -1,4 +1,5 @@
-import connection # Link to Harrison's registry
+# Handles On/Off commands from the Hub/App
+import connection
 
 def queue_base_power(base_name, state):
     """Toggles all 8 nodes at once for a specific base"""
