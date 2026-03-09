@@ -1,3 +1,5 @@
+# Simulated Menu for testing Requirements
+#Created by Harrison Gallo
 import asyncio
 import threading
 import time
@@ -37,7 +39,7 @@ def print_status_menu():
     print("-" * 55)
 
 def main():
-    # FR3: Launch Harrison's Watchdog Thread immediately on startup
+    # Launch Harrison's Watchdog Thread immediately on startup
     threading.Thread(target=connection.socket_watchdog, daemon=True).start()
 
     while True:
@@ -45,7 +47,7 @@ def main():
         choice = input("\nSelect Option: ").strip()
 
         if choice == "1":
-            # FR10: Pairing Process
+            # Pairing Process
             code = input("Enter 8-digit Base Code: ").strip()
             name = input("Enter Name (e.g., Master Bedroom): ").strip()
             print(f"Initializing BLE Pairing for {name}...")
@@ -58,7 +60,7 @@ def main():
             time.sleep(2)
 
         elif choice == "2":
-            # NFR4: Global Base Toggle
+            # Global Base Toggle
             name = input("Target Base Name: ").strip()
             state = input("Action (ON/OFF): ").upper()
             if commands.queue_base_power(name, state):
@@ -68,7 +70,7 @@ def main():
             time.sleep(1.5)
 
         elif choice == "3":
-            # NFR4: Granular Node Toggle
+            # Granular Node Toggle
             name = input("Target Base Name: ").strip()
             node = int(input("Target Node (1-8): "))
             state = input("Action (ON/OFF): ").upper()
