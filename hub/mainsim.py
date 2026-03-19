@@ -5,7 +5,7 @@ import threading
 import time
 import sys
 
-# Harrison's Modular Service Layer
+# Modular Service Layer
 import connection
 import commands
 
@@ -70,7 +70,7 @@ def main():
             time.sleep(1.5)
 
         elif choice == "3":
-            # Granular Node Toggle
+            # Individual Node Toggle
             name = input("Target Base Name: ").strip()
             node = int(input("Target Node (1-8): "))
             state = input("Action (ON/OFF): ").upper()
