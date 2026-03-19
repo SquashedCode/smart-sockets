@@ -30,7 +30,7 @@ void triggerTotalShutdown() { // Safe Mode Actuation
 void executeCommand(String cmd) {
   Serial.println("Processing: " + cmd);
 
-  // Check for Entire Base Kill Switch
+  // Check for Entire Base Off Command/Kill Switch
   if (cmd.indexOf("BASE " + LOCK_CODE + " OFF") >= 0) {
     triggerTotalShutdown();
     return;
