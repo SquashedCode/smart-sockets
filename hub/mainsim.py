@@ -39,7 +39,7 @@ def print_status_menu():
     print("-" * 55)
 
 def main():
-    # Launch Harrison's Watchdog Thread immediately on startup
+    # Launch Watchdog Thread immediately on startup
     threading.Thread(target=connection.socket_watchdog, daemon=True).start()
 
     while True:
