@@ -3,8 +3,8 @@
 // Global System States
 const String LOCK_CODE = "87654321"; // Predetermined "Key" for each Base
 bool isPaired = false;
-String receivedSsid = "";
-String receivedPass = "";
+String receivedSsid = ""; // Storage for WiFi name from Hub
+String receivedPass = ""; // Storage for WiFi Password from Hub
 
 // Functions
 void handlePairing();        
@@ -21,8 +21,8 @@ void setup() {
 
 void loop() {
   if (!isPaired) {
-    handlePairing(); // Pairing
+    handlePairing(); // Waits for BLE pairing if not yet connected
   } else {
-    monitorHeartbeat(); // Wireless Connection Maintenance
+    monitorHeartbeat(); // Once paired WiFi is maintained and monitored with heartbeat
   }
 }
