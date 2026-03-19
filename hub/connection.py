@@ -2,6 +2,8 @@
 import socket
 import time
 import threading
+import os 
+import json # Hardware storage vault
 from bleak import BleakScanner, BleakClient
 
 # --- Configuration ---
@@ -9,10 +11,25 @@ PORT = 5000
 TIMEOUT = 6 
 CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 WIFI_DATA = "WiFi address:password" #Fill in for respective WiFi
+VAULT_FILE = "hub_secure_vault.json" # Hardware storage for encrypted credentials
 
 # Registry to be shared with mainsim.py
 device_registry = {}
 registry_lock = threading.Lock()
+
+def is_hub_authenticated():
+    """Verifies if encrypted credentials exist already"""
+    return os.path.exists(VAULT_FILE)
+
+def store_encrypted_credentials(encrypted_blob):
+    """Stores encrypted data received from the App"""
+    data = {
+        "encrypted_login": encrypted_blob,
+        "timestamp": time.ctime()
+    }
+    with open(VAULT_FILE, "w") as f:
+        json.dump(data, f)
+    print("Hardware Storage: Encrypted credentials saved.")
 
 async def pair_new_base(code, custom_name):
     """BLE Pairing with handover error handling"""
@@ -41,6 +58,10 @@ async def pair_new_base(code, custom_name):
 
 def socket_watchdog():
     """Heartbeat Monitoring"""
+    if not is_hub_authentciated():
+        print("Security Alert: No stored credentials, Hub locked.")
+        return
+        
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
