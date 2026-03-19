@@ -1,5 +1,6 @@
 # Simulated Menu for testing Requirements
-#Created by Harrison Gallo
+# Lines with requiremet names commented = used in actual main later
+# Created by Harrison Gallo
 import asyncio
 import threading
 import time
@@ -16,6 +17,14 @@ def clear_screen():
 def print_status_menu():
     """UI helper to show the state of all 8-node clusters"""
     clear_screen()
+
+    #NFR2
+    # Visual feedback for Security Lockout
+    if connection.is_locked:
+        print("!!! SECURITY ALERT: HUB LOCKED (5 FAILED ATTEMPTS) !!!")
+    elif not connection.is_hub_authenticated():
+        print("--- HUB STATUS: UNAUTHENTICATED (WAITING FOR APP) ---")
+
     print("=== SMART-SOCKET HUB: SYSTEM ARCHITECT CONSOLE ===")
     print("-" * 55)
     
@@ -39,6 +48,7 @@ def print_status_menu():
     print("-" * 55)
 
 def main():
+    # FR4
     # Launch Watchdog Thread immediately on startup
     threading.Thread(target=connection.socket_watchdog, daemon=True).start()
 
@@ -47,7 +57,7 @@ def main():
         choice = input("\nSelect Option: ").strip()
 
         if choice == "1":
-            # Pairing Process
+            # Pairing Process, will carry on in main
             code = input("Enter 8-digit Base Code: ").strip()
             name = input("Enter Name (e.g., Master Bedroom): ").strip()
             print(f"Initializing BLE Pairing for {name}...")
@@ -60,7 +70,7 @@ def main():
             time.sleep(2)
 
         elif choice == "2":
-            # Global Base Toggle
+            # FR10
             name = input("Target Base Name: ").strip()
             state = input("Action (ON/OFF): ").upper()
             if commands.queue_base_power(name, state):
@@ -70,7 +80,7 @@ def main():
             time.sleep(1.5)
 
         elif choice == "3":
-            # Individual Node Toggle
+            # FR10
             name = input("Target Base Name: ").strip()
             node = int(input("Target Node (1-8): "))
             state = input("Action (ON/OFF): ").upper()
