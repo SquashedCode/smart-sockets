@@ -5,6 +5,14 @@ import time
 import threading
 import os
 import json
+import firebase_admin
+from firebase_admin import credentials, db
+
+# --- Firebase Initialization ---
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred, {
+    "databaseURL": "https://smart-sockets-28cc6-default-rtdb.firebaseio.com/"
+})
 
 # Configuration & Constants
 PORT = 5000
@@ -88,6 +96,18 @@ async def pair_new_base(code, custom_name):
         return True
     return False
 
+def send_safe_mode_alert(base_id):
+    """Pushes a Safe Mode notification to Firebase"""
+    alert_ref = db.reference(f"notifications/{base_id}")
+    alert_data = {
+        "event": "SAFE_MODE_ACTIVATED",
+        "message": f"Base {base_id} has lost connection and entered Safe Mode.",
+        "timestamp": int(time.time() * 1000),
+        "status": "unread"
+    }
+    alert_ref.push(alert_data)
+    print(f"Firebase Alert Sent: Safe Mode for {base_id}")
+
 def socket_watchdog():
     """FR3/FR4: The background thread for Heartbeats and Commands [cite: 58, 129]"""
     # Prevent operation if no credentials or if locked 
@@ -126,5 +146,6 @@ def socket_watchdog():
                 with registry_lock:
                     now = time.time()
                     for name, info in device_registry.items():
-                        if now - info.get('last_seen', 0) > TIMEOUT:
+                        if now - info.get('last_seen', 0) > TIMEOUT and info ['status'] != "!!! SAFE MODE !!!":
                             info['status'] = "!!! SAFE MODE !!!"
+                            send_safe_mode_alert(info['code'])
