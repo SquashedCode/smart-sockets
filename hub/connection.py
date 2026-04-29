@@ -96,17 +96,17 @@ async def pair_new_base(code, custom_name):
         return True
     return False
 
-def send_safe_mode_alert(base_id):
-    """Pushes a Safe Mode notification to Firebase"""
-    alert_ref = db.reference(f"notifications/{base_id}")
-    alert_data = {
-        "event": "SAFE_MODE_ACTIVATED",
-        "message": f"Base {base_id} has lost connection and entered Safe Mode.",
-        "timestamp": int(time.time() * 1000),
-        "status": "unread"
-    }
-    alert_ref.push(alert_data)
-    print(f"Firebase Alert Sent: Safe Mode for {base_id}")
+def send_safe_mode_alert(device_id):
+    """FR3: Updates the 'safety' tree when heartbeat is lost"""
+    # We use .child() to target the specific device ID
+    safety_ref = db.reference(f"safety/{device_id}")
+    
+    safety_ref.update({
+        "status": "SAFE_MODE",
+        "last_incident": int(time.time() * 1000),
+        "message": "Heartbeat lost: System autonomously shut down."
+    })
+    print(f"Safety Alert: {device_id} is now in Safe Mode.")
 
 def socket_watchdog():
     """FR3/FR4: The background thread for Heartbeats and Commands [cite: 58, 129]"""
