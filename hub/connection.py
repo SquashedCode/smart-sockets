@@ -22,6 +22,14 @@ WIFI_DATA = "WiFi address:password"
 
 # Hardware storage for encrypted credentials 
 VAULT_FILE = "hub_secure_vault.json" 
+MASTER_KEY = "SECRET_1234"
+
+def encryptXOR(data, key):
+    output = ""
+    for i in range(len(data)):
+        output += chr(ord(data[i]) ^ ord(key[i % len(key)]))
+    return output
+
 MAX_ATTEMPTS = 5 # Lockout threshold 
 login_attempts = 0 # Tracks failed login attempts in-memory
 is_locked = False # System-wide lockout state
@@ -68,7 +76,9 @@ def handle_login_attempt(provided_credentials):
     return True, "Authenticated"
 
 async def pair_new_base(code, custom_name):
-    """FR10: BLE Pairing and initial Handshake coordination [cite: 58, 61]"""
+    """FR10: BLE Pairing and initial Handshake coordination"""
+    encrypted_wifi = encryptXOR(WIFI_DATA, MASTER_KEY)
+    await client.write_gatt_char(CHAR_UUID, encrypted_wifi.encode())
     print(f"Scanning for Base {code}...")
     # Use Bleak to find the ESP32 Base unit
     devices = await BleakScanner.discover(timeout=5.0)
@@ -164,7 +174,8 @@ def socket_watchdog():
                                 
                                 # Send any queued power commands to the Base
                                 if info.get('pending_cmd'):
-                                    conn.sendall(info['pending_cmd'].encode())
+                                    encrypted_cmd = encryptXOR(info['pending_cmd'], MASTER_KEY)
+                                    conn.sendall(encrypted_cmd.encode())
                                     info['pending_cmd'] = None
                                 else:
                                     conn.sendall(b"ACK_OK")
