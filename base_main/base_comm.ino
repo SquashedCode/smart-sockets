@@ -1,80 +1,85 @@
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
-// Handles initial pairing and maintaining wireless connection 
-unsigned long lastHeartbeat = 0;
-const unsigned long heartbeatInterval = 3000; // Expected check-in every 3 seconds
+#include <WiFi.h>
 
-class MyCallbacks: public BLECharacteristicCallbacks { // Triggered when the Hub writes WiFi data
+extern bool isPaired;
+extern bool isShutdown;
+extern String receivedSsid;
+extern String receivedPass;
+extern const String LOCK_CODE;
+
+unsigned long lastHeartbeat = 0;
+const unsigned long heartbeatInterval = 3000;
+
+class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
       String value = pCharacteristic->getValue().c_str();
       if (value.length() > 0) {
-        int separator = value.indexOf(':'); // SSID:PASS format expected
-        receivedSsid = value.substring(0, separator);
-        receivedPass = value.substring(separator + 1);
-        // We set isPaired later in handlePairing only after WiFi is solid
+        int separator = value.indexOf(':');
+        if (separator > 0) {
+          receivedSsid = value.substring(0, separator);
+          receivedPass = value.substring(separator + 1);
+          Serial.println("Credentials received via BLE!");
+        }
       }
     }
 };
 
-void handlePairing() {
-// Initialize BLE with the Base ID as the device name
+void startPairing() {
   BLEDevice::init(LOCK_CODE.c_str());
   BLEServer *pServer = BLEDevice::createServer();
   BLEService *pService = pServer->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
   BLECharacteristic *pChar = pService->createCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8", BLECharacteristic::PROPERTY_WRITE);
   
   pChar->setCallbacks(new MyCallbacks());
-  pService->start(); // BLE service starts
+  pService->start();
   pServer->getAdvertising()->start();
+  Serial.println("Advertising 8-digit code: " + LOCK_CODE);
+}
 
-  Serial.println("Waiting for Hub credentials...");
-  while (receivedSsid == "") { delay(100); } // Waits for BLE data
+void connectToWiFi() {
+  Serial.println("Credentials Received! Connecting to WiFi...");
   
-  Serial.println("Credentials Received! Beginning WiFi connection");
-  pServer->getAdvertising()->stop();
-  BLEDevice::deinit(true); // Close BLE to free up the radio for WiFi
-  
-  WiFi.mode(WIFI_OFF);
-  delay(1000);
   WiFi.mode(WIFI_STA);
   WiFi.begin(receivedSsid.c_str(), receivedPass.c_str());
 
-  while (WiFi.status() != WL_CONNECTED) { // Wait for router handshake
+  // Non-blocking wait for connection (uses timeout check instead of loop)
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && (millis() - startAttempt < 15000)) {
     delay(500);
     Serial.print(".");
   }
 
-  isPaired = true; 
-  lastHeartbeat = millis(); // Initialize Safe Mode timer only after connection
-  Serial.println("\nWiFi Connected! Heartbeat active.");
+  if (WiFi.status() == WL_CONNECTED) {
+    isPaired = true;
+    lastHeartbeat = millis();
+    Serial.println("\nWiFi Connected! Heartbeat active.");
+  } else {
+    Serial.println("\nWiFi connection failed. Clearing credentials to retry.");
+    receivedSsid = ""; // Reset to allow retry from BLE
+  }
 }
 
 void monitorHeartbeat() {
-  if (!isPaired || WiFi.status() != WL_CONNECTED) return;
+  if (isShutdown || !isPaired || WiFi.status() != WL_CONNECTED) return;
 
-  // Safe Mode check every 6 seconds
   if (millis() - lastHeartbeat > 6000) {
-    Serial.println("!!! SYSTEM BLACKOUT !!! Heartbeat Lost.");
-    triggerTotalShutdown(); 
+    triggerTotalShutdown();
     return;
   }
 
-    // Regular check-in with the Hub
   if (millis() - lastHeartbeat > heartbeatInterval) {
     WiFiClient client;
     if (client.connect("192.168.1.65", 5000)) {
       client.println("STATUS_OK_" + LOCK_CODE);
+      lastHeartbeat = millis();
       
-      unsigned long start = millis();
-        // Wait for commands
-      while (client.available() == 0 && millis() - start < 500) { delay(10); }
-      
+      // Read command if available
       if (client.available() > 0) {
         String command = client.readStringUntil('\n');
-        executeCommand(command); // Actuate command based on Hub request
+        executeCommand(command);
       }
-      lastHeartbeat = millis(); 
     }
   }
 }
