@@ -96,6 +96,33 @@ async def pair_new_base(code, custom_name):
         return True
     return False
 
+def firebase_listener():
+    """FR10: Listens for App commands and queues them"""
+    import commands # Import here to avoid circular imports
+    ref = db.reference('/commands')
+    
+    def on_command_change(event):
+        # Triggered when App writes to /commands/{device_id}
+        if event.data is None: return
+        
+        base_name = event.path.strip('/') 
+        if not base_name: return
+        
+        command = event.data.get('action') # "ON" or "OFF"
+        node = event.data.get('node')      # e.g., 1, 2, or 3
+        
+        print(f"App Trigger: {base_name} -> {command}")
+        
+        if node:
+            commands.queue_node_power(base_name, int(node), command)
+        else:
+            commands.queue_base_power(base_name, command)
+            
+        # Delete command after processing so it doesn't run again
+        ref.child(base_name).delete()
+
+    ref.listen(on_command_change)
+
 def send_safe_mode_alert(device_id):
     """FR3: Updates the 'safety' tree when heartbeat is lost"""
     # We use .child() to target the specific device ID
