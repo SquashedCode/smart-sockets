@@ -51,6 +51,7 @@ def main():
     # FR4
     # Launch Watchdog Thread immediately on startup
     threading.Thread(target=connection.socket_watchdog, daemon=True).start()
+    threading.Thread(target=connection.firebase_listener, daemon=True).start()
 
     while True:
         print_status_menu()
