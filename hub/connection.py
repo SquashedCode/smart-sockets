@@ -18,7 +18,7 @@ firebase_admin.initialize_app(cred, {
 PORT = 5000
 TIMEOUT = 6 
 CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-WIFI_DATA = "WiFi address:password" 
+WIFI_DATA = "teamsocket:teamsocket" 
 
 # Hardware storage for encrypted credentials 
 VAULT_FILE = "hub_secure_vault.json" 
@@ -77,29 +77,32 @@ def handle_login_attempt(provided_credentials):
 
 async def pair_new_base(code, custom_name):
     """FR10: BLE Pairing and initial Handshake coordination"""
-    encrypted_wifi = encryptXOR(WIFI_DATA, MASTER_KEY)
-    await client.write_gatt_char(CHAR_UUID, encrypted_wifi.encode())
     print(f"Scanning for Base {code}...")
-    # Use Bleak to find the ESP32 Base unit
+    
+    # Scan for the device first
     devices = await BleakScanner.discover(timeout=5.0)
     target = next((d for d in devices if d.name == code), None)
     
     if target:
         try:
+            # Connect only after finding the target
             async with BleakClient(target.address) as client:
-                # Share WiFi info; encryption is handled before this send 
-                await client.write_gatt_char(CHAR_UUID, WIFI_DATA.encode())
+                # Encrypt data and send inside the connection block (NFR2)
+                encrypted_wifi = encryptXOR(WIFI_DATA, MASTER_KEY)
+                await client.write_gatt_char(CHAR_UUID, encrypted_wifi.encode())
                 await asyncio.sleep(1.0) 
+                print(f"Successfully sent encrypted credentials to {code}")
+                
         except Exception as e:
-            # Handle radio handover errors during WiFi transition
-            print(f"Handover finished (Note: {e})")
+            print(f"Handover failed (Note: {e})")
+            return False # Return False if the connection/write failed
         
-        # Initialize the shared registry for this new cluster [cite: 63, 145]
+        # Initialize the registry with 3 nodes for consistency (NFR4)
         with registry_lock:
             device_registry[custom_name] = {
                 "code": code,
                 "status": "INITIALIZING",
-                "nodes": {i: "OFF" for i in range(1, 9)},
+                "nodes": {i: "OFF" for i in range(1, 4)},
                 "last_seen": time.time(),
                 "pending_cmd": None
             }
