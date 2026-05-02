@@ -7,6 +7,8 @@ import os
 import json
 import firebase_admin
 from firebase_admin import credentials, db
+import asyncio
+from bleak import BleakScanner, BleakClient
 
 # --- Firebase Initialization ---
 cred = credentials.Certificate("serviceAccountKey.json")
@@ -18,7 +20,7 @@ firebase_admin.initialize_app(cred, {
 PORT = 5000
 TIMEOUT = 6 
 CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-WIFI_DATA = "teamsocket:teamsocket" 
+WIFI_DATA = "Rachel:12345678" 
 
 # Hardware storage for encrypted credentials 
 VAULT_FILE = "hub_secure_vault.json" 
