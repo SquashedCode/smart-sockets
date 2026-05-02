@@ -1,99 +1,112 @@
-# Simulated Menu for testing Requirements
-# Lines with requiremet names commented = used in actual main later
-# Created by Harrison Gallo
-import asyncio
+import curses
 import threading
-import time
-import sys
-
-# Modular Service Layer
+import socket
 import connection
 import commands
 
-def clear_screen():
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
+# --- UI State ---
+menu_items = ["Discover Devices", "Devices", "Hub Settings", "Network Status", "About"]
+current_selection = 0
+current_screen = "MAIN_MENU"
 
-def print_status_menu():
-    """UI helper to show the state of all 8-node clusters"""
-    clear_screen()
+def get_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try: s.connect(('8.8.8.8', 80)); ip = s.getsockname()[0]
+    except: ip = "127.0.0.1"
+    finally: s.close()
+    return ip
 
-    #NFR2
-    # Visual feedback for Security Lockout
-    if connection.is_locked:
-        print("!!! SECURITY ALERT: HUB LOCKED (5 FAILED ATTEMPTS) !!!")
-    elif not connection.is_hub_authenticated():
-        print("--- HUB STATUS: UNAUTHENTICATED (WAITING FOR APP) ---")
-
-    print("=== SMART-SOCKET HUB: SYSTEM ARCHITECT CONSOLE ===")
-    print("-" * 55)
+def draw_menu(stdscr):
+    stdscr.clear()
+    h, w = stdscr.getmaxyx()
     
-    with connection.registry_lock:
-        if not connection.device_registry:
-            print("  [!] No Bases Registered. Please Pair a Device.")
-        for name, info in connection.device_registry.items():
-            print(f"[{info['status']}] {name} (ID: {info['code']})")
-            # Displaying the 8-node hierarchy
-            nodes = info['nodes']
-            row1 = "  Nodes 1-4: " + " ".join([f"[{nodes[i]}]" for i in range(1, 5)])
-            row2 = "  Nodes 5-8: " + " ".join([f"[{nodes[i]}]" for i in range(5, 9)])
-            print(row1)
-            print(row2)
     
-    print("-" * 55)
-    print("1. Pair New Base (BLE)")
-    print("2. Toggle Entire Base (All 8 Nodes)")
-    print("3. Toggle Specific Node (1-8)")
-    print("4. Exit")
-    print("-" * 55)
+    stdscr.addstr(0, 0, "Senior Design Hub", curses.A_BOLD)
+    stdscr.addstr(1, 0, "-" * w)
+
+    if current_screen == "MAIN_MENU":
+        for idx, item in enumerate(menu_items):
+            if idx == current_selection:
+                stdscr.attron(curses.A_REVERSE)
+                stdscr.addstr(3 + idx, 2, f"> {item}")
+                stdscr.attroff(curses.A_REVERSE)
+            else:
+                stdscr.addstr(3 + idx, 2, f"  {item}")
+
+    else:
+        # Sub-page layout
+        stdscr.addstr(2, 0, "BACK to return to Menu", curses.A_DIM)
+        stdscr.addstr(4, 0, "-----------------------")
+        
+        if current_screen == "DISCOVER":
+            stdscr.addstr(5, 0, "Enter 9-digit Base Code:")
+            # Logic here handles the input
+        elif current_screen == "DEVICES":
+            with connection.registry_lock:
+                if not connection.device_registry:
+                    stdscr.addstr(5, 0, "No devices discovered yet.")
+                    stdscr.addstr(6, 0, "Return and choose Discover.")
+                else:
+                    y = 5
+                    for name, info in connection.device_registry.items():
+                        stdscr.addstr(y, 0, f"{name}: {info['status']}")
+                        y += 1
+        elif current_screen == "SETTINGS":
+            stdscr.addstr(5, 0, "Hub Name: Senior Design Hub")
+            stdscr.addstr(6, 0, 'Rename is handled by UDP: {"type":"RENAME_HUB","new_name":"New Name"}')
+        elif current_screen == "NETWORK":
+            stdscr.addstr(5, 0, f"Hub IP: {get_ip()}")
+            stdscr.addstr(6, 0, f"UDP Port: 5000")
+            stdscr.addstr(7, 0, f"Devices: {len(connection.device_registry)}")
+            stdscr.addstr(8, 0, f"Broadcast: 255.255.255.255")
+        elif current_screen == "ABOUT":
+            stdscr.addstr(5, 0, "Senior Design Hub")
+            stdscr.addstr(6, 0, "UDP Discovery System")
+            stdscr.addstr(7, 0, "Raspberry Pi + ESP32")
+            stdscr.addstr(8, 0, "LEFT returns to menu")
+
+    stdscr.refresh()
+
+def run_menu(stdscr):
+    global current_selection, current_screen
+    curses.curs_set(0) # Hide cursor
+    
+    while True:
+        draw_menu(stdscr)
+        key = stdscr.getch()
+
+        # Navigation Logic
+        if current_screen == "MAIN_MENU":
+            if key == curses.KEY_UP and current_selection > 0:
+                current_selection -= 1
+            elif key == curses.KEY_DOWN and current_selection < len(menu_items) - 1:
+                current_selection += 1
+            elif key == 10: # Enter key
+                current_screen = menu_items[current_selection].upper().replace(" ", "_")
+                # Mapping screens
+                if current_screen == "DISCOVER_DEVICES": current_screen = "DISCOVER"
+                elif current_screen == "DEVICES": current_screen = "DEVICES"
+                elif current_screen == "HUB_SETTINGS": current_screen = "SETTINGS"
+                elif current_screen == "NETWORK_STATUS": current_screen = "NETWORK"
+                elif current_screen == "ABOUT": current_screen = "ABOUT"
+        else:
+            # Back logic (Any key returns to menu, or specifically LEFT/Back)
+            if key == ord('q') or key == curses.KEY_LEFT:
+                current_screen = "MAIN_MENU"
+
+        # Specific Input Logic for Pairing
+        if current_screen == "DISCOVER":
+             # Implementation of Numpad input would go here
+             # You can use stdscr.getstr() for this
+             pass
 
 def main():
-    # FR4
-    # Launch Watchdog Thread immediately on startup
+    # Start background threads
     threading.Thread(target=connection.socket_watchdog, daemon=True).start()
     threading.Thread(target=connection.firebase_listener, daemon=True).start()
-
-    while True:
-        print_status_menu()
-        choice = input("\nSelect Option: ").strip()
-
-        if choice == "1":
-            # Pairing Process, will carry on in main
-            code = input("Enter 8-digit Base Code: ").strip()
-            name = input("Enter Name (e.g., Master Bedroom): ").strip()
-            print(f"Initializing BLE Pairing for {name}...")
-            
-            success = asyncio.run(connection.pair_new_base(code, name))
-            if success:
-                print(f"SUCCESS: {name} is now in the registry.")
-            else:
-                print("FAILURE: Base not found or BLE error.")
-            time.sleep(2)
-
-        elif choice == "2":
-            # FR10
-            name = input("Target Base Name: ").strip()
-            state = input("Action (ON/OFF): ").upper()
-            if commands.queue_base_power(name, state):
-                print(f"Command Queued: Entire {name} set to {state}")
-            else:
-                print("Error: Base name not recognized.")
-            time.sleep(1.5)
-
-        elif choice == "3":
-            # FR10
-            name = input("Target Base Name: ").strip()
-            node = int(input("Target Node (1-8): "))
-            state = input("Action (ON/OFF): ").upper()
-            if commands.queue_node_power(name, node, state):
-                print(f"Command Queued: {name} Node {node} set to {state}")
-            else:
-                print("Error: Invalid Base or Node number.")
-            time.sleep(1.5)
-
-        elif choice == "4":
-            print("Shutting down Hub...")
-            sys.exit()
+    
+    # Start UI
+    curses.wrapper(run_menu)
 
 if __name__ == "__main__":
     main()
