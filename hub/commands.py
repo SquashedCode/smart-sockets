@@ -1,6 +1,6 @@
 # commands.py
 import connection
-from firebase_admin import db
+# from firebase_admin import db
 
 def queue_base_power(base_name, state):
     state = state.upper() 
@@ -32,7 +32,7 @@ def queue_node_power(base_name, node_num, state):
             connection.device_registry[base_name]['pending_cmd'] = cmd
             connection.device_registry[base_name]['nodes'][node_num] = state
 
-            status_ref = db.reference(f'/status/{base_name}/nodes')
-            status_ref.update({str(node_num): state})
+            #status_ref = db.reference(f'/status/{base_name}/nodes')
+            #status_ref.update({str(node_num): state})
             return True
     return False
