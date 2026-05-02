@@ -103,7 +103,7 @@ def run_menu(stdscr):
 def main():
     # Start background threads
     threading.Thread(target=connection.socket_watchdog, daemon=True).start()
-    threading.Thread(target=connection.firebase_listener, daemon=True).start()
+    # threading.Thread(target=connection.firebase_listener, daemon=True).start()
     
     # Start UI
     curses.wrapper(run_menu)
