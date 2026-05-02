@@ -5,16 +5,16 @@ import time
 import threading
 import os
 import json
-import firebase_admin
-from firebase_admin import credentials, db
+#import firebase_admin
+#from firebase_admin import credentials, db
 import asyncio
 from bleak import BleakScanner, BleakClient
 
 # --- Firebase Initialization ---
-cred = credentials.Certificate("serviceAccountKey.json")
-firebase_admin.initialize_app(cred, {
-    "databaseURL": "https://smart-sockets-28cc6-default-rtdb.firebaseio.com/"
-})
+#cred = credentials.Certificate("serviceAccountKey.json")
+#firebase_admin.initialize_app(cred, {
+ #   "databaseURL": "https://smart-sockets-28cc6-default-rtdb.firebaseio.com/"
+#})
 
 # Configuration & Constants
 PORT = 5000
@@ -116,8 +116,8 @@ def firebase_listener():
     import commands # Import here to avoid circular imports
     ref = db.reference('/commands')
     
-    def on_command_change(event):
-        # Triggered when App writes to /commands/{device_id}
+     def on_command_change(event):
+         # Triggered when App writes to /commands/{device_id}
         if event.data is None: return
         
         base_name = event.path.strip('/') 
