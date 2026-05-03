@@ -6,6 +6,8 @@ const String BASE_ID = "BASE_001";
 const String DEVICE_NAME = "Living Room";
 const String MASTER_KEY = "SECRET_1234";
 const int UDP_PORT = 50000;
+unsigned long lastPacketReceived = 0; 
+const unsigned long TIMEOUT_ms = 10000; 
 
 WiFiUDP udp;
 bool isShutdown = false; 
