@@ -1,85 +1,41 @@
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
-#include <WiFi.h>
+#include <WiFiUdp.h>
 
-extern bool isPaired;
-extern bool isShutdown;
-extern String receivedSsid;
-extern String receivedPass;
-extern const String LOCK_CODE;
+extern WiFiUDP udp;
+extern const String MASTER_KEY;
+extern const String BASE_ID;
+extern const String DEVICE_NAME;
 
-unsigned long lastHeartbeat = 0;
-const unsigned long heartbeatInterval = 3000;
-
-class MyCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      String value = pCharacteristic->getValue().c_str();
-      if (value.length() > 0) {
-        int separator = value.indexOf(':');
-        if (separator > 0) {
-          receivedSsid = value.substring(0, separator);
-          receivedPass = value.substring(separator + 1);
-          Serial.println("Credentials received via BLE!");
-        }
-      }
-    }
-};
-
-void startPairing() {
-  BLEDevice::init(LOCK_CODE.c_str());
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-  BLECharacteristic *pChar = pService->createCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8", BLECharacteristic::PROPERTY_WRITE);
-  
-  pChar->setCallbacks(new MyCallbacks());
-  pService->start();
-  pServer->getAdvertising()->start();
-  Serial.println("Advertising 8-digit code: " + LOCK_CODE);
-}
-
-void connectToWiFi() {
-  Serial.println("Credentials Received! Connecting to WiFi...");
-  
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(receivedSsid.c_str(), receivedPass.c_str());
-
-  // Non-blocking wait for connection (uses timeout check instead of loop)
-  unsigned long startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && (millis() - startAttempt < 15000)) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    isPaired = true;
-    lastHeartbeat = millis();
-    Serial.println("\nWiFi Connected! Heartbeat active.");
-  } else {
-    Serial.println("\nWiFi connection failed. Clearing credentials to retry.");
-    receivedSsid = ""; // Reset to allow retry from BLE
-  }
-}
-
-void monitorHeartbeat() {
-  if (isShutdown || !isPaired || WiFi.status() != WL_CONNECTED) return;
-
-  if (millis() - lastHeartbeat > 6000) {
-    triggerTotalShutdown();
+void handleIncomingUDP(String rawData, IPAddress senderIP, int senderPort) {
+  // 1. Check if this is a Discovery Broadcast
+  if (rawData == "DISCOVER_REQ") {
+    sendDiscoveryReply(senderIP, senderPort);
     return;
   }
 
-  if (millis() - lastHeartbeat > heartbeatInterval) {
-    WiFiClient client;
-    if (client.connect("192.168.1.65", 5000)) {
-      client.println("STATUS_OK_" + LOCK_CODE);
-      lastHeartbeat = millis();
-      
-      // Read command if available
-      if (client.available() > 0) {
-        String command = client.readStringUntil('\n');
-        executeCommand(command);
-      }
-    }
+  // 2. Otherwise, treat as an Encrypted Command
+  processIncomingCommand(rawData); 
+}
+
+void sendDiscoveryReply(IPAddress ip, int port) {
+  // Construct Status String: Name|IP|Node1,Node2,Node3
+  String status = getStatusString(); 
+  String reply = DEVICE_NAME + "|" + WiFi.localIP().toString() + "|" + status;
+  
+  udp.beginPacket(ip, port);
+  udp.print(reply);
+  udp.endPacket();
+  Serial.println("Discovery reply sent.");
+}
+
+// Reuse your decryption logic from before
+String decryptXOR(String data, String key) { /* ... keep your existing logic ... */ }
+
+void processIncomingCommand(String rawData) {
+  String decrypted = decryptXOR(rawData, MASTER_KEY);
+  int colonIndex = decrypted.indexOf(':');
+  if (colonIndex == -1) return;
+  
+  if (decrypted.substring(0, colonIndex) == BASE_ID) {
+    executeCommand(decrypted.substring(colonIndex + 1));
   }
 }
