@@ -12,15 +12,27 @@ void triggerTotalShutdown() {
 }
 
 void executeCommand(String node, String value) {
-  int pinIdx = -1;
-  
-  // Mapping JSON nodes to hardware indices
-  if (node == "Node_L") pinIdx = 0;
-  else if (node == "Node_R") pinIdx = 1;
-  else if (node == "NONE") { /* Apply to all? */ }
+  // Determine the target signal (High=LOW, Low=HIGH due to Active Low relay)
+  int signal = (value == "High") ? LOW : HIGH;
 
-  if (pinIdx != -1) {
-    if (value == "High") digitalWrite(NODE_PINS[pinIdx], LOW); // Assuming Active Low
-    else digitalWrite(NODE_PINS[pinIdx], HIGH);
+  // Check for Global "ALL" Command
+  if (node == "ALL") {
+    Serial.println("Executing command on ALL nodes.");
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(NODE_PINS[i], signal);
+    }
+  } 
+  // Standard Individual Node Mapping
+  else {
+    int pinIdx = -1;
+    if (node == "Node_L") pinIdx = 0;
+    else if (node == "Node_R") pinIdx = 1;
+    else if (node == "Node_M") pinIdx = 2;
+
+    if (pinIdx != -1) {
+      digitalWrite(NODE_PINS[pinIdx], signal);
+    } else {
+      Serial.println("Error: Unknown Node identifier.");
+    }
   }
 }
