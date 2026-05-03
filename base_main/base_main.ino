@@ -20,7 +20,7 @@ void setup() {
   setupPins(); // From base_commands
   
   // Hardcoded WiFi connection
-  WiFi.begin("Crimson-traveler", "3CrimsonCrows!");
+  WiFi.begin("CrimsonTraveler-2.4", "3CrimsonCrows!");
   while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
   
   udp.begin(UDP_PORT);
