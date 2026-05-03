@@ -1,38 +1,47 @@
-const int NODE_PINS[3] = {2, 6, 7}; // Map your indices 0, 1, 2
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <ArduinoJson.h>
+#include <time.h>
 
-void setupPins() {
-  for (int i = 0; i < 3; i++) {
-    pinMode(NODE_PINS[i], OUTPUT);
-    digitalWrite(NODE_PINS[i], HIGH); // OFF
+const String BASE_NAME = "Base_1";
+const int UDP_PORT = 50000;
+unsigned long lastPacketReceived = millis();
+unsigned long lastHeartbeatSent = 0; 
+bool isShutdown = false;
+
+WiFiUDP udp;
+
+void setup() {
+  Serial.begin(115200);
+  setupPins(); 
+  
+  WiFi.begin("CrimsonTraveler-2.4", "3CrimsonCrows!");
+  while (WiFi.status() != WL_CONNECTED) { delay(500); }
+  
+  configTime(0, 0, "pool.ntp.org");
+  udp.begin(UDP_PORT);
+}
+
+void loop() {
+  // Receive UDP
+  int packetSize = udp.parsePacket();
+  if (packetSize > 0) {
+    char incoming[512];
+    int len = udp.read(incoming, 511);
+    incoming[len] = '\0';
+    handleIncomingUDP(incoming, udp.remoteIP(), udp.remotePort());
   }
-}
 
-void triggerTotalShutdown() {
-  for (int i = 0; i < 3; i++) digitalWrite(NODE_PINS[i], HIGH);
-}
+  // Periodic ESP-to-PI Heartbeat
+  if (millis() - lastHeartbeatSent > 3000) {
+    sendHeartbeat();
+    lastHeartbeatSent = millis();
+  }
 
-void executeCommand(String node, String value) {
-  // Determine the target signal (High=LOW, Low=HIGH due to Active Low relay)
-  int signal = (value == "High") ? LOW : HIGH;
-
-  // Check for Global "ALL" Command
-  if (node == "ALL") {
-    Serial.println("Executing command on ALL nodes.");
-    for (int i = 0; i < 3; i++) {
-      digitalWrite(NODE_PINS[i], signal);
-    }
-  } 
-  // Standard Individual Node Mapping
-  else {
-    int pinIdx = -1;
-    if (node == "Node_L") pinIdx = 0;
-    else if (node == "Node_R") pinIdx = 1;
-    else if (node == "Node_M") pinIdx = 2;
-
-    if (pinIdx != -1) {
-      digitalWrite(NODE_PINS[pinIdx], signal);
-    } else {
-      Serial.println("Error: Unknown Node identifier.");
-    }
+  // FR3: Safe Mode Timeout (6s)
+  if (!isShutdown && (millis() - lastPacketReceived > 6000)) {
+    Serial.println("Heartbeat lost. Safe Mode engaged.");
+    triggerTotalShutdown(); //
+    isShutdown = true;
   }
 }
