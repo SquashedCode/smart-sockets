@@ -1,30 +1,38 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
+#include <ArduinoJson.h>
+#include <time.h>
 
-const String BASE_ID = "BASE_001"; 
-const String DEVICE_NAME = "Living Room";
-const String MASTER_KEY = "SECRET_1234";
+const String BASE_NAME = "Base_1";
 const int UDP_PORT = 50000;
+unsigned long lastPacketReceived = millis();
+bool isShutdown = false;
 
 WiFiUDP udp;
-bool isShutdown = false; 
-unsigned long lastPacketReceived = millis(); // Track time
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-  
-  setupPins(); 
+  setupPins(); // From base_commands
   
   WiFi.begin("CrimsonTraveler-2.4", "3CrimsonCrows!");
-  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  while (WiFi.status() != WL_CONNECTED) { delay(500); }
+  
+  // Initialize NTP for accurate timestamps
+  configTime(0, 0, "pool.ntp.org"); 
   
   udp.begin(UDP_PORT);
-  Serial.println("\n--- Initialized: " + DEVICE_NAME + " ---");
+}
+
+// 
+String getFormattedTime() {
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) return "0-0-0-0:0:0";
+  char buffer[32];
+  strftime(buffer, sizeof(buffer), "%m-%d-%y-%H:%M:%S", &timeinfo);
+  return String(buffer);
 }
 
 void loop() {
-  // 1. Always listen for packets (even if shutdown)
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
     char incoming[512];
@@ -33,12 +41,10 @@ void loop() {
     handleIncomingUDP(incoming, udp.remoteIP(), udp.remotePort());
   }
 
-  // 2. FR3 Requirement: Safe Mode Watchdog (6 Seconds)
+  // FR3: Safe Mode Timeout (6s)
   if (!isShutdown && (millis() - lastPacketReceived > 6000)) {
-    Serial.println("Heartbeat lost! Activating Safe Mode.");
+    Serial.println("Heartbeat lost. Safe Mode engaged.");
     triggerTotalShutdown();
     isShutdown = true;
   }
-  
-  delay(10);
 }
