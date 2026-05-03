@@ -1,66 +1,70 @@
-#include <WiFiUdp.h>
+#include <ArduinoJson.h>
 
 extern WiFiUDP udp;
-extern const String MASTER_KEY;
-extern const String BASE_ID;
-extern const String DEVICE_NAME;
-extern unsigned long lastPacketReceived;
-extern bool isShutdown;
+extern String getFormattedTime(); // Defined in base_main
+extern void executeCommand(String node, String value);
+extern const String BASE_NAME;
 
-void handleIncomingUDP(String rawData, IPAddress senderIP, int senderPort) {
-  // 1. Discovery Packet
-  if (rawData == "DISCOVER_REQ") {
-    sendDiscoveryReply(senderIP, senderPort);
+void handleIncomingUDP(char* jsonPayload, IPAddress senderIP, int senderPort) {
+  StaticJsonDocument<512> doc;
+  DeserializationError error = deserializeJson(doc, jsonPayload);
+
+  if (error) {
+    Serial.println("Failed to parse JSON packet.");
     return;
   }
 
-  // 2. Heartbeat Packet Format: "HubName,HubIP,Heartbeat"
-  if (rawData.indexOf("Heartbeat") >= 0) {
-    processHeartbeat(rawData, senderIP, senderPort);
-    return;
-  }
+  // Check for Heartbeat or Command based on Action
+  String action = doc["Action"] | "";
 
-  // 3. Encrypted Command
-  processIncomingCommand(rawData); 
-}
-
-void processHeartbeat(String packet, IPAddress senderIP, int senderPort) {
-  // Reset Watchdog Timer
-  lastPacketReceived = millis();
+  // Handle Heartbeat (FR3 Requirement)
+  if (action == "Heartbeat") {
+    lastPacketReceived = millis();
+    if (isShutdown) isShutdown = false;
+    sendHeartbeatResponse(senderIP, senderPort);
+  } 
   
-  // Recover from Safe Mode if we were shut down
-  if (isShutdown) {
-    Serial.println("Heartbeat received. Recovery initiated (System OFF).");
-    isShutdown = false;
-    // Note: Per requirement, system stays OFF/Safe until new commands arrive
+  // Handle Power Commands (FR10 Requirement)
+  else if (action == "Power") {
+    // Parsing Command Packet Hub to Base
+    String cmdID = doc["Command_ID"];
+    String node = doc["Node"];
+    String value = doc["Value"];
+    
+    // Execute hardware command
+    executeCommand(node, value);
+    
+    // Send Command Response Base to Hub
+    sendResponse(cmdID, senderIP, senderPort);
   }
-
-  // Reply: "BaseName,HubIP,Heartbeat"
-  String reply = DEVICE_NAME + "," + WiFi.localIP().toString() + ",Heartbeat";
-  udp.beginPacket(senderIP, senderPort);
-  udp.print(reply);
-  udp.endPacket();
 }
 
-void sendDiscoveryReply(IPAddress ip, int port) {
-  String status = getStatusString(); 
-  String reply = DEVICE_NAME + "|" + WiFi.localIP().toString() + "|" + status;
+// Responding to Hub Heartbeat
+void sendHeartbeatResponse(IPAddress ip, int port) {
+  StaticJsonDocument<256> doc;
+  doc["hub_name"] = "Hub_1"; // Echoing back
+  doc["ip"] = WiFi.localIP().toString();
+  doc["Action"] = "Heartbeat_response";
+  
+  char buffer[256];
+  serializeJson(doc, buffer);
   udp.beginPacket(ip, port);
-  udp.print(reply);
+  udp.write((uint8_t*)buffer, strlen(buffer));
   udp.endPacket();
 }
 
-// Keep your existing decryptXOR and processIncomingCommand logic...
-
-// Reuse your decryption logic from before
-String decryptXOR(String data, String key) { /* ... keep your existing logic ... */ }
-
-void processIncomingCommand(String rawData) {
-  String decrypted = decryptXOR(rawData, MASTER_KEY);
-  int colonIndex = decrypted.indexOf(':');
-  if (colonIndex == -1) return;
+// Responding to Command Packet (Base -> Hub)
+void sendResponse(String cmdID, IPAddress ip, int port) {
+  StaticJsonDocument<256> doc;
+  doc["Command_ID"] = cmdID;         // Echoing ID from Hub
+  doc["base_name"] = BASE_NAME;      // "Base_1"
+  doc["base_ip"] = WiFi.localIP().toString();
+  doc["status"] = "Success";
+  doc["time"] = getFormattedTime(); 
   
-  if (decrypted.substring(0, colonIndex) == BASE_ID) {
-    executeCommand(decrypted.substring(colonIndex + 1));
-  }
+  char buffer[256];
+  serializeJson(doc, buffer);
+  udp.beginPacket(ip, port);
+  udp.write((uint8_t*)buffer, strlen(buffer));
+  udp.endPacket();
 }
