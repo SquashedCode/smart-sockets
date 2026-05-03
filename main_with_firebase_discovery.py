@@ -43,12 +43,13 @@ UDP_PORT = 50000
 BROADCAST_IP = "255.255.255.255"
 
 HUB_NAME_FILE = "hub_name.txt"
-DEFAULT_HUB_NAME = "Pi Central Hub"
+DEFAULT_HUB_NAME = "Hub_1"
 
 DATABASE_URL = "https://team-socket-default-rtdb.firebaseio.com/"
 SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
 KNOWN_DEVICES_FILE = "known_devices.json"
 USER_NAME = "User"
+HUB_INFO_KEY = "_Hub_Info"
 
 DISCOVERY_INTERVAL = 60
 DEVICE_TIMEOUT = 180
@@ -141,6 +142,31 @@ def save_known_devices_file(known_data):
         json.dump(known_data, file, indent=2)
 
 
+def ensure_firebase_hub_branch():
+    if firebase_admin is None or not firebase_admin._apps:
+        return
+
+    hub_ref_path = f"DeviceList/{USER_NAME}/{hub_name}"
+    hub_ref = db.reference(hub_ref_path)
+    hub_data = hub_ref.get()
+
+    hub_info = {
+        "Hub_Name": hub_name,
+        "Hub_IP": get_local_ip(),
+        "Status_hub": "Online",
+        "last_seen": str(time.time())
+    }
+
+    if hub_data is None:
+        hub_ref.set({
+            HUB_INFO_KEY: hub_info
+        })
+        print(f"Created Firebase hub branch: {hub_ref_path}")
+    else:
+        hub_ref.child(HUB_INFO_KEY).set(hub_info)
+        print(f"Firebase hub branch ready: {hub_ref_path}")
+
+
 def sync_device_to_firebase(device_name, device_data):
     if firebase_admin is None or not firebase_admin._apps:
         return
@@ -203,6 +229,9 @@ def load_known_devices_into_memory():
         devices = {}
 
         for device_name, device_data in known_data.get("devices", {}).items():
+            if device_name == HUB_INFO_KEY:
+                continue
+
             devices[device_name] = {
                 "name": device_data.get("name", device_name),
                 "ip": device_data.get("ip", "Unknown"),
@@ -652,6 +681,7 @@ def main():
 
     load_hub_name()
     init_firebase()
+    ensure_firebase_hub_branch()
     load_known_devices_into_memory()
     setup_buttons()
 
