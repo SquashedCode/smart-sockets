@@ -142,29 +142,52 @@ def save_known_devices_file(known_data):
         json.dump(known_data, file, indent=2)
 
 
+def make_firebase_safe_device_data(device_data):
+    """Return only the fields that are allowed by the current Firebase rules."""
+    return {
+        "name": str(device_data.get("name", "Unknown")),
+        "ip": str(device_data.get("ip", "0.0.0.0")),
+        "Status_base": str(device_data.get("Status_base", "Online")),
+        "Node_L": {
+            "Attached": bool(device_data.get("Node_L", {}).get("Attached", False)),
+            "Power": bool(device_data.get("Node_L", {}).get("Power", False))
+        },
+        "Node_R": {
+            "Attached": bool(device_data.get("Node_R", {}).get("Attached", False)),
+            "Power": bool(device_data.get("Node_R", {}).get("Power", False))
+        }
+    }
+
+
 def ensure_firebase_hub_branch():
     if firebase_admin is None or not firebase_admin._apps:
         return
 
     hub_ref_path = f"DeviceList/{USER_NAME}/{hub_name}"
     hub_ref = db.reference(hub_ref_path)
-    hub_data = hub_ref.get()
 
-    hub_info = {
-        "Hub_Name": hub_name,
-        "Hub_IP": get_local_ip(),
-        "Status_hub": "Online",
-        "last_seen": str(time.time())
-    }
+    # Firebase Realtime Database does not keep empty branches.
+    # Your current rules also say every child under Hub_1 must look like a base.
+    # This creates a rules-compatible starter child so Hub_1 exists before bases are discovered.
+    hub_starter_data = make_firebase_safe_device_data({
+        "name": hub_name,
+        "ip": get_local_ip(),
+        "Status_base": "Hub_Online",
+        "Node_L": {
+            "Attached": False,
+            "Power": False
+        },
+        "Node_R": {
+            "Attached": False,
+            "Power": False
+        }
+    })
 
-    if hub_data is None:
-        hub_ref.set({
-            HUB_INFO_KEY: hub_info
-        })
-        print(f"Created Firebase hub branch: {hub_ref_path}")
-    else:
-        hub_ref.child(HUB_INFO_KEY).set(hub_info)
+    try:
+        hub_ref.child(HUB_INFO_KEY).set(hub_starter_data)
         print(f"Firebase hub branch ready: {hub_ref_path}")
+    except Exception as error:
+        print("Could not create Firebase hub branch:", error)
 
 
 def sync_device_to_firebase(device_name, device_data):
@@ -173,7 +196,11 @@ def sync_device_to_firebase(device_name, device_data):
 
     ref_path = f"DeviceList/{USER_NAME}/{hub_name}/{device_name}"
     device_ref = db.reference(ref_path)
-    device_ref.set(device_data)
+
+    try:
+        device_ref.set(make_firebase_safe_device_data(device_data))
+    except Exception as error:
+        print(f"Could not sync {device_name} to Firebase:", error)
 
 
 def build_device_data(device_name, device_ip, message):
@@ -229,9 +256,6 @@ def load_known_devices_into_memory():
         devices = {}
 
         for device_name, device_data in known_data.get("devices", {}).items():
-            if device_name == HUB_INFO_KEY:
-                continue
-
             devices[device_name] = {
                 "name": device_data.get("name", device_name),
                 "ip": device_data.get("ip", "Unknown"),
