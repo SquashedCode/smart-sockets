@@ -1,81 +1,42 @@
 #include <WiFi.h>
-#include <ArduinoOTA.h>
+#include <WiFiUdp.h>
 
-// --- NFR4: Cluster Identity ---
+// --- System Configuration ---
 const String BASE_ID = "BASE_001"; 
+const String DEVICE_NAME = "Living Room";
+const String MASTER_KEY = "SECRET_1234";
+const int UDP_PORT = 50000;
 
-const String MASTER_KEY = "SECRET_1234"; // Must match the Hub's key
-
-// Global System States
-const String LOCK_CODE = "87654321";
-bool isPaired = false;
+WiFiUDP udp;
 bool isShutdown = false; 
-String receivedSsid = ""; 
-String receivedPass = ""; 
 
-// --- NFR2: Decryption Logic ---
-String decryptXOR(String data, String key) {
-  String output = "";
-  for (int i = 0; i < data.length(); i++) {
-    output += (char)(data[i] ^ key[i % key.length()]);
-  }
-  return output;
-}
-
-
-void processIncomingCommand(String rawData) {
-  String decrypted = decryptXOR(rawData, MASTER_KEY);
-  
-  int colonIndex = decrypted.indexOf(':');
-  if (colonIndex == -1) {
-    Serial.println("Invalid packet format.");
-    return;
-  }
-  
-  String incomingID = decrypted.substring(0, colonIndex);
-  String command = decrypted.substring(colonIndex + 1);
-  
-  if (incomingID != BASE_ID) {
-    Serial.println("Ignored: Targeted at different cluster.");
-    return;
-  }
-  
-  executeCommand(command);
-}
-
-// Functions
-void startPairing();          
-void connectToWiFi();         
-void monitorHeartbeat();     
-void executeCommand(String cmd); 
-void setupPins();            
-void triggerTotalShutdown();
-
+// --- Core Logic ---
 void setup() {
   Serial.begin(115200);
-  delay(1000); 
-  setupPins(); 
+  delay(1000);
   
-  Serial.print("--- System Initializing: ");
-  Serial.print(BASE_ID);
-  Serial.println(" ---");
+  setupPins(); // From base_commands
   
-  startPairing(); 
+  // Hardcoded WiFi connection
+  WiFi.begin("Crimson-traveler", "3CrimsonCrows!");
+  while (WiFi.status() != WL_CONNECTED) { delay(500); Serial.print("."); }
+  
+  udp.begin(UDP_PORT);
+  Serial.println("\n--- Initialized: " + DEVICE_NAME + " ---");
 }
 
 void loop() {
-  if (isShutdown) {
-    delay(100); 
-    return;
-  }
+  if (isShutdown) return;
 
-  if (!isPaired && receivedSsid != "") {
-    connectToWiFi();
-  } 
-  else if (isPaired) {
-    ArduinoOTA.handle();
-    monitorHeartbeat();
-
+  // Handle incoming UDP
+  int packetSize = udp.parsePacket();
+  if (packetSize > 0) {
+    char incoming[512];
+    int len = udp.read(incoming, 511);
+    incoming[len] = '\0';
+    
+    // Pass to communication handler
+    handleIncomingUDP(incoming, udp.remoteIP(), udp.remotePort());
   }
-  delay(10); 
+  delay(10);
 }
