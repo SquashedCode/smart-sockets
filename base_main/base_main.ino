@@ -4,7 +4,7 @@
 #include <time.h>
 
 // --- Configuration ---
-const String BASE_NAME = "Base_1";
+const String BASE_NAME = "base_1";
 const int UDP_PORT = 50000;
 IPAddress hubIP;
 
