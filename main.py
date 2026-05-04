@@ -111,6 +111,21 @@ udp_socket = None
 def debug_print_packet(data, address):
     ip = address[0]
 
+    # Try to parse JSON first
+    try:
+        message = json.loads(data.decode("utf-8"))
+    except Exception:
+        return  # Ignore non-JSON packets
+
+    #------------------------------------------------------------
+    # FILTER: ONLY SHOW DISCOVERY RESPONSES
+    #------------------------------------------------------------
+
+    action = str(message.get("Action", "")).lower()
+
+    if action not in ["discovery_response", "discovery response"]:
+        return
+    
     print("\n================ UDP PACKET ================")
     print(f"FROM: {ip}")
 
