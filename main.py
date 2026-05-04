@@ -356,7 +356,7 @@ def send_discovery():
     message = {
         "Hub_name": hub_name,
         "Hub_IP": get_local_ip(),
-        "Action": "Discovery",
+        "Action": "discovery",
         "port": UDP_PORT
     }
 
@@ -368,8 +368,8 @@ def is_discovery_response(message):
     msg_type = message.get("type", "")
 
     return (
-        action == "Discovery_Response"
-        or action == "DiscoveryResponse"
+        action == "discovery_Response"
+        or action == "discoveryresponse"
         or msg_type == "DISCOVERY_RESPONSE"
     )
 
