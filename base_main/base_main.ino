@@ -48,9 +48,7 @@ void setup() {
 
   Serial.println("--- SYSTEM IDLE: WAITING FOR DISCOVERY ---");
   Serial.println("The Base is waiting for a UDP packet containing the following JSON:");
-  Serial.println("{\"Action\": \"Discovery\", \"Hub_Name\": \"YOUR_HUB_NAME_HERE\"}");
-  Serial.println("------------------------------------------");
-  
+  Serial.println("{\"Action\": \"discovery\", \"Hub_Name\": \"YOUR_HUB_NAME_HERE\"}");  
 }
 
 void loop() {
@@ -79,7 +77,7 @@ void loop() {
 
     // Safe Mode Protocol: Trigger if no response for 10s
     if (!isShutdown && (millis() - lastHeartbeatReceived > 10000)) {
-      Serial.println("!! WATCHDOG TIMEOUT: No heartbeat response for 10s. Entering Safe Mode !!");
+      Serial.println("!! Safe Mode!!: No heartbeat response for 10s. Entering Safe Mode !!");
       triggerTotalShutdown(); // Sets LEDs to SAFE_MODE (Yellow)
       isShutdown = true;
     }
