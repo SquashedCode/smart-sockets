@@ -46,9 +46,7 @@ void setup() {
   udp.begin(UDP_PORT);
   configTime(0, 0, "pool.ntp.org");
 
-  Serial.println("--- SYSTEM IDLE: WAITING FOR DISCOVERY ---");
-  Serial.println("The Base is waiting for a UDP packet containing the following JSON:");
-  Serial.println("{\"Action\": \"discovery\", \"hub_name\": \"...\"}");  
+  Serial.println("--- SYSTEM IDLE: WAITING FOR DISCOVERY ---"); 
 }
 
 void loop() {
@@ -63,7 +61,6 @@ void loop() {
     processIncomingUDP(incoming, udp.remoteIP(), udp.remotePort());
   }
 
-  // 3. Operational Logic (Only if successfully paired with Hub)
   if (isDiscovered && !isUpdating) {
     // Heartbeat Protocol: Send every 6 seconds
     if (millis() - lastDiscoveryReceived > 16000) {
