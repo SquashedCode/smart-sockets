@@ -104,6 +104,38 @@ needs_display_update = True
 running = True
 udp_socket = None
 
+#------------------------------------------------------------
+# DEBUG: PRINT UDP PACKET
+#------------------------------------------------------------
+
+def debug_print_packet(data, address):
+    ip = address[0]
+
+    print("\n================ UDP PACKET ================")
+    print(f"FROM: {ip}")
+
+    # Raw bytes (exactly what came over network)
+    try:
+        raw_str = data.decode("utf-8")
+        print("\nRAW STRING:")
+        print(raw_str)
+    except Exception:
+        print("\nRAW BYTES (non-utf8):")
+        print(data)
+
+    # Parsed JSON
+    try:
+        message = json.loads(data.decode("utf-8"))
+
+        print("\nPARSED JSON:")
+        print(json.dumps(message, indent=2))
+
+    except Exception as e:
+        print("\nJSON PARSE ERROR:")
+        print(e)
+
+    print("============================================\n")
+
 
 #------------------------------------------------------------
 # FIREBASE SETUP
@@ -382,6 +414,7 @@ def udp_listener_thread():
     while running:
         try:
             data, address = udp_socket.recvfrom(4096)
+            debug_print_packet(data,address)
             handle_udp_message(data, address)
         except socket.timeout:
             pass
