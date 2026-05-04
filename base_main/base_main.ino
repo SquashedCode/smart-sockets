@@ -48,7 +48,7 @@ void setup() {
 
   Serial.println("--- SYSTEM IDLE: WAITING FOR DISCOVERY ---");
   Serial.println("The Base is waiting for a UDP packet containing the following JSON:");
-  Serial.println("{\"Action\": \"discovery\", \"Hub_Name\": \"YOUR_HUB_NAME_HERE\"}");  
+  Serial.println("{\"Action\": \"discovery\", \"hub_name\": \"...\"}");  
 }
 
 void loop() {
