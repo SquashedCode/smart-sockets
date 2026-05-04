@@ -53,6 +53,10 @@ SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
 USER_NAME = "user"
 HUB_INFO_KEY = "_hub_info"
 
+# Use "commands" instead if your Firebase tree is lowercase.
+COMMANDS_PATH = "command_list/commands"
+COMMAND_POLL_INTERVAL = 1.0
+
 DISCOVERY_INTERVAL = 5
 DEVICE_TIMEOUT = 20
 
@@ -148,7 +152,7 @@ def debug_print_packet(data, address):
 
     action = clean_lower_string(message.get("action", ""))
 
-    if action != "discovery_response":
+    if action not in ["discovery_response", "command_response"]:
         return
 
     print("\n================ UDP PACKET ================")
@@ -196,44 +200,44 @@ def init_firebase():
 #------------------------------------------------------------
 
 def make_firebase_safe_device_data(device_data):
-    node_l = device_data.get("node_L", {})
-    node_r = device_data.get("node_R", {})
+    node_l = device_data.get("node_l", {})
+    node_r = device_data.get("node_r", {})
 
     return {
         "name": clean_lower_string(device_data.get("name", "unknown")),
         "ip": clean_string(device_data.get("ip", "0.0.0.0")),
-        "Status_base": clean_lower_string(device_data.get("status_base", "online")),
-        "Node_L": {
-            "Attached": string_true(node_l.get("attached", "false")),
-            "Power": string_true(node_l.get("power", "false"))
+        "status_base": clean_lower_string(device_data.get("status_base", "online")),
+        "node_l": {
+            "attached": string_true(node_l.get("attached", "false")),
+            "power": string_true(node_l.get("power", "false"))
         },
-        "Node_R": {
-            "Attached": string_true(node_r.get("attached", "false")),
-            "Power": string_true(node_r.get("power", "false"))
+        "node_r": {
+            "attached": string_true(node_r.get("attached", "false")),
+            "power": string_true(node_r.get("power", "false"))
         }
     }
 
 
 def firebase_to_runtime_device(device_name, device_data):
-    node_l = device_data.get("Node_L", {})
-    node_r = device_data.get("Node_R", {})
+    node_l = device_data.get("node_l", {})
+    node_r = device_data.get("node_r", {})
 
     return {
         "name": clean_lower_string(device_data.get("name", device_name)),
         "ip": clean_string(device_data.get("ip", "unknown")),
-        "status": clean_lower_string(device_data.get("Status_base", "unknown")),
+        "status": clean_lower_string(device_data.get("status_base", "unknown")),
         "last_seen": time.time(),
         "raw": {
             "name": clean_lower_string(device_data.get("name", device_name)),
             "ip": clean_string(device_data.get("ip", "unknown")),
-            "status_base": clean_lower_string(device_data.get("Status_base", "unknown")),
-            "node_L": {
-                "attached": bool_to_string(node_l.get("Attached", False)),
-                "power": bool_to_string(node_l.get("Power", False))
+            "status_base": clean_lower_string(device_data.get("status_base", "unknown")),
+            "node_l": {
+                "attached": bool_to_string(node_l.get("attached", False)),
+                "power": bool_to_string(node_l.get("power", False))
             },
-            "node_R": {
-                "attached": bool_to_string(node_r.get("Attached", False)),
-                "power": bool_to_string(node_r.get("Power", False))
+            "node_r": {
+                "attached": bool_to_string(node_r.get("attached", False)),
+                "power": bool_to_string(node_r.get("power", False))
             }
         }
     }
@@ -247,18 +251,18 @@ def ensure_firebase_hub_branch():
     if firebase_admin is None or not firebase_admin._apps:
         return
 
-    hub_ref_path = f"DeviceList/{USER_NAME}/{hub_name}"
+    hub_ref_path = f"device_list/{USER_NAME}/{hub_name}"
     hub_ref = db.reference(hub_ref_path)
 
     hub_starter_data = make_firebase_safe_device_data({
         "name": hub_name,
         "ip": get_local_ip(),
         "status_base": "hub_online",
-        "node_L": {
+        "node_l": {
             "attached": "false",
             "power": "false"
         },
-        "node_R": {
+        "node_r": {
             "attached": "false",
             "power": "false"
         }
@@ -275,7 +279,7 @@ def sync_device_to_firebase(device_name, device_data):
     if firebase_admin is None or not firebase_admin._apps:
         return
 
-    ref_path = f"DeviceList/{USER_NAME}/{hub_name}/{device_name}"
+    ref_path = f"device_list/{USER_NAME}/{hub_name}/{device_name}"
     device_ref = db.reference(ref_path)
 
     try:
@@ -285,18 +289,18 @@ def sync_device_to_firebase(device_name, device_data):
 
 
 def build_device_data(device_name, device_ip, message):
-    node_l = message.get("node_L", {})
-    node_r = message.get("node_R", {})
+    node_l = message.get("node_l", {})
+    node_r = message.get("node_r", {})
 
     return {
         "name": clean_lower_string(device_name, "unknown_esp"),
         "ip": clean_string(device_ip, "0.0.0.0"),
         "status_base": "online",
-        "node_L": {
+        "node_l": {
             "attached": bool_to_string(node_l.get("attached", "false")),
             "power": bool_to_string(node_l.get("power", "false"))
         },
-        "node_R": {
+        "node_r": {
             "attached": bool_to_string(node_r.get("attached", "false")),
             "power": bool_to_string(node_r.get("power", "false"))
         }
@@ -317,7 +321,7 @@ def load_devices_from_firebase():
     if firebase_admin is None or not firebase_admin._apps:
         return
 
-    ref_path = f"DeviceList/{USER_NAME}/{hub_name}"
+    ref_path = f"device_list/{USER_NAME}/{hub_name}"
     firebase_devices = db.reference(ref_path).get()
 
     with devices_lock:
@@ -331,6 +335,138 @@ def load_devices_from_firebase():
                 devices[device_name] = firebase_to_runtime_device(device_name, device_data)
 
     needs_display_update = True
+
+
+#------------------------------------------------------------
+# FIREBASE COMMAND HANDLING
+#------------------------------------------------------------
+
+def get_oldest_pending_command():
+    if firebase_admin is None or not firebase_admin._apps:
+        return None, None
+
+    try:
+        commands = db.reference(COMMANDS_PATH).get()
+    except Exception as error:
+        print("could not read commands:", error)
+        return None, None
+
+    if not commands:
+        return None, None
+
+    pending_commands = []
+
+    for command_id, command_data in commands.items():
+        if not isinstance(command_data, dict):
+            continue
+
+        status = clean_lower_string(command_data.get("status", ""))
+        command_hub = clean_lower_string(command_data.get("hub", ""))
+
+        if status == "pending" and command_hub == hub_name:
+            pending_commands.append((command_id, command_data))
+
+    if not pending_commands:
+        return None, None
+
+    def command_time(item):
+        try:
+            return float(item[1].get("time", 0))
+        except Exception:
+            return 0
+
+    pending_commands.sort(key=command_time)
+
+    return pending_commands[0]
+
+
+def update_command_status(command_id, status):
+    if firebase_admin is None or not firebase_admin._apps:
+        return
+
+    try:
+        db.reference(f"{COMMANDS_PATH}/{command_id}/status").set(status)
+    except Exception as error:
+        print("could not update command status:", error)
+
+
+def make_udp_command_packet(command_id, command_data):
+    return {
+        "action": clean_lower_string(command_data.get("action", "")),
+        "command_id": command_id,
+        "hub_name": clean_lower_string(command_data.get("hub", hub_name)),
+        "base": clean_lower_string(command_data.get("base", "")),
+        "node": clean_string(command_data.get("node", "all")),
+        "value": clean_string(command_data.get("value", "")),
+        "port": str(UDP_PORT)
+    }
+
+
+def get_base_ip_from_runtime_or_firebase(base_name):
+    base_name = clean_lower_string(base_name)
+
+    with devices_lock:
+        if base_name in devices:
+            ip = devices[base_name].get("ip", "")
+            status = clean_lower_string(devices[base_name].get("status", ""))
+
+            if ip and ip != "unknown" and status != "offline":
+                return ip
+
+    if firebase_admin is None or not firebase_admin._apps:
+        return None
+
+    try:
+        device_data = db.reference(f"device_list/{USER_NAME}/{hub_name}/{base_name}").get()
+    except Exception as error:
+        print("could not check firebase device list:", error)
+        return None
+
+    if not device_data:
+        return None
+
+    ip = clean_string(device_data.get("ip", ""))
+    status = clean_lower_string(device_data.get("status_base", ""))
+
+    if ip and ip != "unknown" and status != "offline":
+        return ip
+
+    return None
+
+
+def process_pending_command(command_id, command_data):
+    base_name = clean_lower_string(command_data.get("base", ""))
+
+    if not base_name:
+        print("pending command missing base field:", command_id)
+        update_command_status(command_id, "Error")
+        return
+
+    packet = make_udp_command_packet(command_id, command_data)
+
+    update_command_status(command_id, "processing")
+
+    base_ip = get_base_ip_from_runtime_or_firebase(base_name)
+
+    if base_ip:
+        print(f"sending command {command_id} directly to {base_name} at {base_ip}")
+        send_udp_message(packet, ip=base_ip)
+    else:
+        print(f"{base_name} not found in device list, broadcasting command {command_id}")
+        packet["broadcast_lookup"] = "true"
+        send_udp_message(packet, ip=BROADCAST_IP)
+
+
+def command_poll_thread():
+    global running
+
+    while running:
+        command_id, command_data = get_oldest_pending_command()
+
+        if command_id and command_data:
+            process_pending_command(command_id, command_data)
+
+        time.sleep(COMMAND_POLL_INTERVAL)
 
 
 #------------------------------------------------------------
@@ -376,6 +512,10 @@ def create_udp_socket():
 def send_udp_message(message, ip=BROADCAST_IP, port=UDP_PORT):
     global udp_socket
 
+    if udp_socket is None:
+        print("udp socket is not ready")
+        return
+
     data = json.dumps(message).encode("utf-8")
     udp_socket.sendto(data, (ip, port))
 
@@ -398,7 +538,7 @@ def get_local_ip():
 def send_discovery():
     message = {
         "hub_name": hub_name,
-        "hub_IP": get_local_ip(),
+        "hub_ip": get_local_ip(),
         "action": "discovery",
         "port": str(UDP_PORT)
     }
@@ -428,6 +568,10 @@ def handle_udp_message(data, address):
 
     action = clean_lower_string(message.get("action", ""))
 
+    print("UDP MESSAGE RECIEVED:")
+    print(json.dumps(message, indent=2))
+    print("ACTION:",action)
+
     if action == "discovery":
         return
 
@@ -453,6 +597,39 @@ def handle_udp_message(data, address):
 
         print(f"discovery response synced: {name} at {ip}")
         needs_display_update = True
+
+    elif action == "command_response":
+        command_id = clean_string(message.get("command_id", ""))
+        base_name = (
+            message.get("base")
+            or message.get("device_name")
+            or message.get("name")
+            or ""
+        )
+
+        base_name = clean_lower_string(base_name)
+        response_status = clean_lower_string(message.get("status", ""))
+
+        if base_name:
+            device_data = save_device_to_firebase(base_name, ip, message)
+
+            with devices_lock:
+                devices[base_name] = {
+                    "name": base_name,
+                    "ip": ip,
+                    "status": device_data.get("status_base", "online"),
+                    "last_seen": time.time(),
+                    "raw": device_data
+                }
+
+            print(f"command response synced: {base_name} at {ip}")
+            needs_display_update = True
+
+        if command_id:
+            if response_status in ["success", "successful", "complete", "completed"]:
+                update_command_status(command_id, "complete")
+            else:
+                update_command_status(command_id, "error")
 
     elif message.get("type", "") == "rename_hub":
         new_name = message.get("new_name")
@@ -489,7 +666,7 @@ def discovery_thread():
 
     while running:
         send_discovery()
-        check_for_offline_devices()
+        #check_for_offline_devices()
         time.sleep(DISCOVERY_INTERVAL)
 
 
@@ -660,8 +837,8 @@ def draw_devices_menu(draw):
     device = device_list[index]
 
     raw = device.get("raw", {})
-    node_l = raw.get("node_L", {})
-    node_r = raw.get("node_R", {})
+    node_l = raw.get("node_l", {})
+    node_r = raw.get("node_r", {})
 
     draw.text((25, 60), f"Device {index + 1}/{len(device_list)}", font=small_font, fill=0)
     draw.text((25, 88), f"Name: {device['name']}", font=item_font, fill=0)
@@ -803,6 +980,7 @@ def main():
 
     threading.Thread(target=udp_listener_thread, daemon=True).start()
     threading.Thread(target=discovery_thread, daemon=True).start()
+    threading.Thread(target=command_poll_thread, daemon=True).start()
 
     print("hub started")
     print("hub name:", hub_name)
