@@ -45,13 +45,13 @@ UDP_PORT = 50000
 BROADCAST_IP = "255.255.255.255"
 
 HUB_NAME_FILE = "hub_name.txt"
-DEFAULT_HUB_NAME = "Hub_1"
+DEFAULT_HUB_NAME = "hub_1"
 
 DATABASE_URL = "https://team-socket-default-rtdb.firebaseio.com/"
 SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
 
-USER_NAME = "User"
-HUB_INFO_KEY = "_Hub_Info"
+USER_NAME = "user"
+HUB_INFO_KEY = "_hub_info"
 
 DISCOVERY_INTERVAL = 5
 DEVICE_TIMEOUT = 20
@@ -104,6 +104,36 @@ needs_display_update = True
 running = True
 udp_socket = None
 
+
+#------------------------------------------------------------
+# STRING HELPERS
+#------------------------------------------------------------
+
+def clean_string(value, default=""):
+    if value is None:
+        return default
+
+    return str(value)
+
+
+def clean_lower_string(value, default=""):
+    if value is None:
+        return default
+
+    return str(value).strip().lower()
+
+
+def string_true(value):
+    return clean_lower_string(value) in ["true", "1", "on", "high", "yes"]
+
+
+def bool_to_string(value):
+    if isinstance(value, str):
+        return "true" if string_true(value) else "false"
+
+    return "true" if bool(value) else "false"
+
+
 #------------------------------------------------------------
 # DEBUG: PRINT UDP PACKET
 #------------------------------------------------------------
@@ -111,25 +141,19 @@ udp_socket = None
 def debug_print_packet(data, address):
     ip = address[0]
 
-    # Try to parse JSON first
     try:
         message = json.loads(data.decode("utf-8"))
     except Exception:
-        return  # Ignore non-JSON packets
-
-    #------------------------------------------------------------
-    # FILTER: ONLY SHOW DISCOVERY RESPONSES
-    #------------------------------------------------------------
-
-    action = str(message.get("Action", "")).lower()
-
-    if action not in ["discovery_response", "discovery response"]:
         return
-    
+
+    action = clean_lower_string(message.get("action", ""))
+
+    if action != "discovery_response":
+        return
+
     print("\n================ UDP PACKET ================")
     print(f"FROM: {ip}")
 
-    # Raw bytes (exactly what came over network)
     try:
         raw_str = data.decode("utf-8")
         print("\nRAW STRING:")
@@ -138,16 +162,8 @@ def debug_print_packet(data, address):
         print("\nRAW BYTES (non-utf8):")
         print(data)
 
-    # Parsed JSON
-    try:
-        message = json.loads(data.decode("utf-8"))
-
-        print("\nPARSED JSON:")
-        print(json.dumps(message, indent=2))
-
-    except Exception as e:
-        print("\nJSON PARSE ERROR:")
-        print(e)
+    print("\nPARSED JSON:")
+    print(json.dumps(message, indent=2))
 
     print("============================================\n")
 
@@ -171,25 +187,61 @@ def init_firebase():
             "databaseURL": DATABASE_URL
         })
 
-    print("Connected to Firebase")
+    print("connected to firebase")
     return True
 
 
+#------------------------------------------------------------
+# FIREBASE DEVICE FORMAT
+#------------------------------------------------------------
+
 def make_firebase_safe_device_data(device_data):
+    node_l = device_data.get("node_L", {})
+    node_r = device_data.get("node_R", {})
+
     return {
-        "name": str(device_data.get("name", "Unknown")),
-        "ip": str(device_data.get("ip", "0.0.0.0")),
-        "Status_base": str(device_data.get("Status_base", "Online")),
+        "name": clean_lower_string(device_data.get("name", "unknown")),
+        "ip": clean_string(device_data.get("ip", "0.0.0.0")),
+        "Status_base": clean_lower_string(device_data.get("status_base", "online")),
         "Node_L": {
-            "Attached": bool(device_data.get("Node_L", {}).get("Attached", False)),
-            "Power": bool(device_data.get("Node_L", {}).get("Power", False))
+            "Attached": string_true(node_l.get("attached", "false")),
+            "Power": string_true(node_l.get("power", "false"))
         },
         "Node_R": {
-            "Attached": bool(device_data.get("Node_R", {}).get("Attached", False)),
-            "Power": bool(device_data.get("Node_R", {}).get("Power", False))
+            "Attached": string_true(node_r.get("attached", "false")),
+            "Power": string_true(node_r.get("power", "false"))
         }
     }
 
+
+def firebase_to_runtime_device(device_name, device_data):
+    node_l = device_data.get("Node_L", {})
+    node_r = device_data.get("Node_R", {})
+
+    return {
+        "name": clean_lower_string(device_data.get("name", device_name)),
+        "ip": clean_string(device_data.get("ip", "unknown")),
+        "status": clean_lower_string(device_data.get("Status_base", "unknown")),
+        "last_seen": time.time(),
+        "raw": {
+            "name": clean_lower_string(device_data.get("name", device_name)),
+            "ip": clean_string(device_data.get("ip", "unknown")),
+            "status_base": clean_lower_string(device_data.get("Status_base", "unknown")),
+            "node_L": {
+                "attached": bool_to_string(node_l.get("Attached", False)),
+                "power": bool_to_string(node_l.get("Power", False))
+            },
+            "node_R": {
+                "attached": bool_to_string(node_r.get("Attached", False)),
+                "power": bool_to_string(node_r.get("Power", False))
+            }
+        }
+    }
+
+
+#------------------------------------------------------------
+# FIREBASE DEVICE STORAGE
+#------------------------------------------------------------
 
 def ensure_firebase_hub_branch():
     if firebase_admin is None or not firebase_admin._apps:
@@ -201,22 +253,22 @@ def ensure_firebase_hub_branch():
     hub_starter_data = make_firebase_safe_device_data({
         "name": hub_name,
         "ip": get_local_ip(),
-        "Status_base": "Hub_Online",
-        "Node_L": {
-            "Attached": False,
-            "Power": False
+        "status_base": "hub_online",
+        "node_L": {
+            "attached": "false",
+            "power": "false"
         },
-        "Node_R": {
-            "Attached": False,
-            "Power": False
+        "node_R": {
+            "attached": "false",
+            "power": "false"
         }
     })
 
     try:
         hub_ref.child(HUB_INFO_KEY).set(hub_starter_data)
-        print(f"Firebase hub branch ready: {hub_ref_path}")
+        print(f"firebase hub branch ready: {hub_ref_path}")
     except Exception as error:
-        print("Could not create Firebase hub branch:", error)
+        print("could not create firebase hub branch:", error)
 
 
 def sync_device_to_firebase(device_name, device_data):
@@ -229,34 +281,30 @@ def sync_device_to_firebase(device_name, device_data):
     try:
         device_ref.set(make_firebase_safe_device_data(device_data))
     except Exception as error:
-        print(f"Could not sync {device_name} to Firebase:", error)
+        print(f"could not sync {device_name} to firebase:", error)
 
-#------------------------------------------------------------
-# KNOWN DEVICE STORAGE
-#------------------------------------------------------------
 
 def build_device_data(device_name, device_ip, message):
-    node_l = message.get("Node_L", {
-        "Attached": False,
-        "Power": False
-    })
-    node_r = message.get("Node_R", {
-        "Attached": False,
-        "Power": False
-    })
+    node_l = message.get("node_L", {})
+    node_r = message.get("node_R", {})
 
     return {
-        "name": device_name,
-        "ip": device_ip,
-        "Status_base": "Online",
-        "Node_L": node_l,
-        "Node_R": node_r
+        "name": clean_lower_string(device_name, "unknown_esp"),
+        "ip": clean_string(device_ip, "0.0.0.0"),
+        "status_base": "online",
+        "node_L": {
+            "attached": bool_to_string(node_l.get("attached", "false")),
+            "power": bool_to_string(node_l.get("power", "false"))
+        },
+        "node_R": {
+            "attached": bool_to_string(node_r.get("attached", "false")),
+            "power": bool_to_string(node_r.get("power", "false"))
+        }
     }
 
 
 def save_device_to_firebase(device_name, device_ip, message):
     device_data = build_device_data(device_name, device_ip, message)
-
     sync_device_to_firebase(device_name, device_data)
 
     return device_data
@@ -280,15 +328,10 @@ def load_devices_from_firebase():
                 if device_name == HUB_INFO_KEY:
                     continue
 
-                devices[device_name] = {
-                    "name": device_data.get("name", device_name),
-                    "ip": device_data.get("ip", "Unknown"),
-                    "status": device_data.get("Status_base", "Unknown"),
-                    "last_seen": time.time(),
-                    "raw": device_data
-                }
+                devices[device_name] = firebase_to_runtime_device(device_name, device_data)
 
     needs_display_update = True
+
 
 #------------------------------------------------------------
 # HUB NAME STORAGE
@@ -302,13 +345,13 @@ def load_hub_name():
             name = file.read().strip()
 
         if name:
-            hub_name = name
+            hub_name = clean_lower_string(name)
 
 
 def save_hub_name(new_name):
     global hub_name
 
-    hub_name = new_name
+    hub_name = clean_lower_string(new_name)
 
     with open(HUB_NAME_FILE, "w") as file:
         file.write(hub_name)
@@ -345,7 +388,7 @@ def get_local_ip():
         test_socket.close()
         return ip
     except Exception:
-        return "Unavailable"
+        return "unavailable"
 
 
 #------------------------------------------------------------
@@ -354,24 +397,19 @@ def get_local_ip():
 
 def send_discovery():
     message = {
-        "Hub_name": hub_name,
-        "Hub_IP": get_local_ip(),
-        "Action": "discovery",
-        "port": UDP_PORT
+        "hub_name": hub_name,
+        "hub_IP": get_local_ip(),
+        "action": "discovery",
+        "port": str(UDP_PORT)
     }
 
     send_udp_message(message)
 
 
 def is_discovery_response(message):
-    action = message.get("Action", "")
-    msg_type = message.get("type", "")
+    action = clean_lower_string(message.get("action", ""))
 
-    return (
-        action == "discovery_Response"
-        or action == "discoveryresponse"
-        or msg_type == "DISCOVERY_RESPONSE"
-    )
+    return action == "discovery_response"
 
 
 #------------------------------------------------------------
@@ -386,48 +424,46 @@ def handle_udp_message(data, address):
     try:
         message = json.loads(data.decode("utf-8"))
     except json.JSONDecodeError:
-        print("Received non-JSON packet from", ip)
         return
 
-    #------------------------------------------------------------
-    # FILTER OUT HUB DISCOVERY PACKETS
-    #------------------------------------------------------------
+    action = clean_lower_string(message.get("action", ""))
 
-    if message.get("Action") == "discovery":
+    if action == "discovery":
         return
 
     if is_discovery_response(message):
         name = (
             message.get("device_name")
-            or message.get("Base")
+            or message.get("base")
             or message.get("name")
-            or "Unknown ESP"
+            or "unknown_esp"
         )
 
+        name = clean_lower_string(name)
         device_data = save_device_to_firebase(name, ip, message)
 
         with devices_lock:
             devices[name] = {
                 "name": name,
                 "ip": ip,
-                "status": device_data.get("Status_base", "Online"),
+                "status": device_data.get("status_base", "online"),
                 "last_seen": time.time(),
                 "raw": device_data
             }
 
-        print(f"Discovery response synced: {name} at {ip}")
+        print(f"discovery response synced: {name} at {ip}")
         needs_display_update = True
 
-    elif message.get("type", "") == "RENAME_HUB":
+    elif message.get("type", "") == "rename_hub":
         new_name = message.get("new_name")
 
         if new_name:
             save_hub_name(new_name)
-            print("Hub renamed to:", new_name)
+            print("hub renamed to:", hub_name)
             needs_display_update = True
 
     else:
-        print("Unknown UDP message from", ip, message)
+        return
 
 
 def udp_listener_thread():
@@ -436,12 +472,12 @@ def udp_listener_thread():
     while running:
         try:
             data, address = udp_socket.recvfrom(4096)
-            debug_print_packet(data,address)
+            debug_print_packet(data, address)
             handle_udp_message(data, address)
         except socket.timeout:
             pass
         except Exception as error:
-            print("UDP listener error:", error)
+            print("udp listener error:", error)
 
 
 #------------------------------------------------------------
@@ -467,11 +503,11 @@ def check_for_offline_devices():
             age = now - devices[device_name]["last_seen"]
 
             if age > DEVICE_TIMEOUT:
-                if devices[device_name]["status"] != "Offline":
-                    print("Marking stale device offline:", devices[device_name]["name"])
+                if devices[device_name]["status"] != "offline":
+                    print("marking stale device offline:", devices[device_name]["name"])
 
-                    devices[device_name]["status"] = "Offline"
-                    devices[device_name]["raw"]["Status_base"] = "Offline"
+                    devices[device_name]["status"] = "offline"
+                    devices[device_name]["raw"]["status_base"] = "offline"
 
                     sync_device_to_firebase(device_name, devices[device_name]["raw"])
 
@@ -624,8 +660,8 @@ def draw_devices_menu(draw):
     device = device_list[index]
 
     raw = device.get("raw", {})
-    node_l = raw.get("Node_L", {})
-    node_r = raw.get("Node_R", {})
+    node_l = raw.get("node_L", {})
+    node_r = raw.get("node_R", {})
 
     draw.text((25, 60), f"Device {index + 1}/{len(device_list)}", font=small_font, fill=0)
     draw.text((25, 88), f"Name: {device['name']}", font=item_font, fill=0)
@@ -634,14 +670,14 @@ def draw_devices_menu(draw):
 
     draw.text(
         (25, 190),
-        f"L: A={node_l.get('Attached')} P={node_l.get('Power')}",
+        f"L: A={node_l.get('attached')} P={node_l.get('power')}",
         font=item_font,
         fill=0
     )
 
     draw.text(
         (25, 224),
-        f"R: A={node_r.get('Attached')} P={node_r.get('Power')}",
+        f"R: A={node_r.get('attached')} P={node_r.get('power')}",
         font=item_font,
         fill=0
     )
@@ -661,8 +697,8 @@ def draw_settings_menu(draw):
     draw.text((25, 105), hub_name, font=item_font, fill=0)
 
     draw.text((25, 165), "Rename over UDP:", font=item_font, fill=0)
-    draw.text((25, 205), '{"type":"RENAME_HUB",', font=small_font, fill=0)
-    draw.text((25, 235), '"new_name":"New Name"}', font=small_font, fill=0)
+    draw.text((25, 205), '{"type":"rename_hub",', font=small_font, fill=0)
+    draw.text((25, 235), '"new_name":"new_name"}', font=small_font, fill=0)
     draw.text((25, 265), "SELECT: back", font=small_font, fill=0)
 
 
@@ -768,10 +804,10 @@ def main():
     threading.Thread(target=udp_listener_thread, daemon=True).start()
     threading.Thread(target=discovery_thread, daemon=True).start()
 
-    print("Hub started.")
-    print("Hub name:", hub_name)
-    print("Listening on UDP port:", UDP_PORT)
-    print("Local IP:", get_local_ip())
+    print("hub started")
+    print("hub name:", hub_name)
+    print("listening on udp port:", UDP_PORT)
+    print("local IP:", get_local_ip())
 
     send_discovery()
 
@@ -786,7 +822,7 @@ def main():
             time.sleep(0.05)
 
     except KeyboardInterrupt:
-        print("Shutting down...")
+        print("shutting down...")
 
     finally:
         running = False
