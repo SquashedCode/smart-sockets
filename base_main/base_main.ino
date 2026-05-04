@@ -13,7 +13,7 @@ bool isDiscovered = false;
 bool isShutdown = false;
 bool isUpdating = false;      // Added for firmware update state
 String pairedHubName = ""; 
-unsigned long lastHeartbeatReceived = millis();
+unsigned long lastDiscoveryReceived = millis();
 unsigned long lastHeartbeatSent = 0;
 
 WiFiUDP udp;
@@ -52,12 +52,9 @@ void setup() {
 }
 
 void loop() {
-  // 1. LED State Management for Firmware Updates
   if (isUpdating) {
     updateLEDStatus("UPDATING");
   }
-
-  // 2. UDP Packet Handling
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
     char incoming[512];
@@ -68,18 +65,13 @@ void loop() {
 
   // 3. Operational Logic (Only if successfully paired with Hub)
   if (isDiscovered && !isUpdating) {
-    
     // Heartbeat Protocol: Send every 6 seconds
-    if (millis() - lastHeartbeatSent > 6000) {
-      sendHeartbeat();
-      lastHeartbeatSent = millis();
-    }
-
-    // Safe Mode Protocol: Trigger if no response for 10s
-    if (!isShutdown && (millis() - lastHeartbeatReceived > 10000)) {
-      Serial.println("!! Safe Mode!!: No heartbeat response for 10s. Entering Safe Mode !!");
-      triggerTotalShutdown(); // Sets LEDs to SAFE_MODE (Yellow)
+    if (millis() - lastDiscoveryReceived > 16000) {
+      Serial.println("!!SAFE MODE!!");
+      isDiscovered = false;
       isShutdown = true;
+      triggerTotalShutdown();
+      updateLEDStatus("SAFE_MODE");
     }
   }
 }
