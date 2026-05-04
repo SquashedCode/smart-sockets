@@ -27,7 +27,7 @@ void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort) {
   if (deserializeJson(doc, rawData)) return; 
 
   String action = doc["action"] | "";
-  String hubName = doc["hub_Name"] | "";
+  String hubName = doc["hub_name"] | "";
 
   // 1. DISCOVERY LOGIC (Acts as both Pairing and Heartbeat)
   if (action == "discovery") {
@@ -76,16 +76,6 @@ void sendDiscoveryResponse(IPAddress ip, int port) {
   nodeNone["power"] = isNodeOn(2);
 
   sendJsonPacket(doc, ip, port);
-}
-
-// HEARTBEAT (ESP -> PI)
-void sendHeartbeat() {
-  StaticJsonDocument<256> doc;
-  doc["device_name"] = BASE_NAME;
-  doc["ip"] = WiFi.localIP().toString();
-  doc["action"] = "heartbeat";
-  
-  sendJsonPacket(doc, hubIP, 50000);
 }
 
 // COMMAND RESPONSE (ESP -> PI)
