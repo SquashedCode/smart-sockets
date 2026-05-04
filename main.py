@@ -10,9 +10,14 @@ from datetime import datetime
 import RPi.GPIO as GPIO
 from PIL import Image, ImageDraw, ImageFont
 
-# ------------------------------------------------------------
-# Waveshare import
-# ------------------------------------------------------------
+try:
+    import firebase_admin
+    from firebase_admin import credentials
+    from firebase_admin import db
+except ImportError:
+    firebase_admin = None
+    credentials = None
+    db = None
 
 try:
     from waveshare_epd import epd4in2_V2 as epd_driver
@@ -23,21 +28,31 @@ except ImportError:
         epd_driver = None
 
 
-# ------------------------------------------------------------
-# Basic configuration
-# ------------------------------------------------------------
-
 UDP_PORT = 50000
 BROADCAST_IP = "255.255.255.255"
 
 HUB_NAME_FILE = "hub_name.txt"
-DEFAULT_HUB_NAME = "Pi Central Hub"
+DEFAULT_HUB_NAME = "Hub_1"
+
+DATABASE_URL = "https://team-socket-default-rtdb.firebaseio.com/"
+SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
+KNOWN_DEVICES_FILE = "known_devices.json"
+USER_NAME = "User"
+HUB_INFO_KEY = "_Hub_Info"
 
 DISCOVERY_INTERVAL = 60
 DEVICE_TIMEOUT = 180
 
 DISPLAY_WIDTH = 400
 DISPLAY_HEIGHT = 300
+
+# Larger font sizes for Waveshare 4.2 inch e-paper display
+FONT_HEADER = 26
+FONT_MAIN_ITEM = 30
+FONT_ITEM = 26
+FONT_SMALL = 18
+
+HEADER_HEIGHT = 48
 
 BUTTON_UP = 5
 BUTTON_DOWN = 6
@@ -53,10 +68,6 @@ BUTTON_PINS = [
     BUTTON_SELECT
 ]
 
-
-# ------------------------------------------------------------
-# Hub state
-# ------------------------------------------------------------
 
 hub_name = DEFAULT_HUB_NAME
 devices = {}
@@ -78,9 +89,170 @@ needs_display_update = True
 running = True
 
 
-# ------------------------------------------------------------
-# Name storage
-# ------------------------------------------------------------
+def init_firebase():
+    if firebase_admin is None:
+        print("firebase-admin is not installed. Firebase sync disabled.")
+        return False
+
+    if not os.path.exists(SERVICE_ACCOUNT_FILE):
+        print(f"{SERVICE_ACCOUNT_FILE} not found. Firebase sync disabled.")
+        return False
+
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(SERVICE_ACCOUNT_FILE)
+        firebase_admin.initialize_app(cred, {
+            "databaseURL": DATABASE_URL
+        })
+
+    print("Connected to Firebase")
+    return True
+
+
+def load_known_devices_file():
+    if not os.path.exists(KNOWN_DEVICES_FILE):
+        return {
+            "Hub_Name": hub_name,
+            "devices": {}
+        }
+
+    try:
+        with open(KNOWN_DEVICES_FILE, "r") as file:
+            return json.load(file)
+    except json.JSONDecodeError:
+        print("known_devices.json is invalid. Starting with an empty list.")
+        return {
+            "Hub_Name": hub_name,
+            "devices": {}
+        }
+
+
+def save_known_devices_file(known_data):
+    known_data["Hub_Name"] = hub_name
+
+    with open(KNOWN_DEVICES_FILE, "w") as file:
+        json.dump(known_data, file, indent=2)
+
+
+def make_firebase_safe_device_data(device_data):
+    return {
+        "name": str(device_data.get("name", "Unknown")),
+        "ip": str(device_data.get("ip", "0.0.0.0")),
+        "Status_base": str(device_data.get("Status_base", "Online")),
+        "Node_L": {
+            "Attached": bool(device_data.get("Node_L", {}).get("Attached", False)),
+            "Power": bool(device_data.get("Node_L", {}).get("Power", False))
+        },
+        "Node_R": {
+            "Attached": bool(device_data.get("Node_R", {}).get("Attached", False)),
+            "Power": bool(device_data.get("Node_R", {}).get("Power", False))
+        }
+    }
+
+
+def ensure_firebase_hub_branch():
+    if firebase_admin is None or not firebase_admin._apps:
+        return
+
+    hub_ref_path = f"DeviceList/{USER_NAME}/{hub_name}"
+    hub_ref = db.reference(hub_ref_path)
+
+    hub_starter_data = make_firebase_safe_device_data({
+        "name": hub_name,
+        "ip": get_local_ip(),
+        "Status_base": "Hub_Online",
+        "Node_L": {
+            "Attached": False,
+            "Power": False
+        },
+        "Node_R": {
+            "Attached": False,
+            "Power": False
+        }
+    })
+
+    try:
+        hub_ref.child(HUB_INFO_KEY).set(hub_starter_data)
+        print(f"Firebase hub branch ready: {hub_ref_path}")
+    except Exception as error:
+        print("Could not create Firebase hub branch:", error)
+
+
+def sync_device_to_firebase(device_name, device_data):
+    if firebase_admin is None or not firebase_admin._apps:
+        return
+
+    ref_path = f"DeviceList/{USER_NAME}/{hub_name}/{device_name}"
+    device_ref = db.reference(ref_path)
+
+    try:
+        device_ref.set(make_firebase_safe_device_data(device_data))
+    except Exception as error:
+        print(f"Could not sync {device_name} to Firebase:", error)
+
+
+def build_device_data(device_name, device_ip, message):
+    node_l = message.get("Node_L", {
+        "Attached": False,
+        "Power": False
+    })
+
+    node_r = message.get("Node_R", {
+        "Attached": False,
+        "Power": False
+    })
+
+    return {
+        "name": device_name,
+        "ip": device_ip,
+        "Status_base": "Online",
+        "last_seen": str(time.time()),
+        "Node_L": node_l,
+        "Node_R": node_r
+    }
+
+
+def update_known_device(device_name, device_ip, message):
+    known_data = load_known_devices_file()
+    known_devices = known_data["devices"]
+    device_data = build_device_data(device_name, device_ip, message)
+
+    if device_name in known_devices:
+        old_ip = known_devices[device_name].get("ip")
+
+        if old_ip != device_ip:
+            print(f"{device_name} IP updated: {old_ip} -> {device_ip}")
+        else:
+            print(f"{device_name} already known")
+    else:
+        print(f"New device discovered: {device_name}")
+
+    known_devices[device_name] = device_data
+    save_known_devices_file(known_data)
+    sync_device_to_firebase(device_name, device_data)
+
+    return device_data
+
+
+def load_known_devices_into_memory():
+    global devices
+    global needs_display_update
+
+    known_data = load_known_devices_file()
+
+    with devices_lock:
+        devices = {}
+
+        for device_name, device_data in known_data.get("devices", {}).items():
+            devices[device_name] = {
+                "name": device_data.get("name", device_name),
+                "ip": device_data.get("ip", "Unknown"),
+                "status": device_data.get("Status_base", "Unknown"),
+                "last_seen": float(device_data.get("last_seen", time.time())),
+                "raw": device_data
+            }
+
+    needs_display_update = True
+
 
 def load_hub_name():
     global hub_name
@@ -101,10 +273,6 @@ def save_hub_name(new_name):
     with open(HUB_NAME_FILE, "w") as file:
         file.write(hub_name)
 
-
-# ------------------------------------------------------------
-# UDP network functions
-# ------------------------------------------------------------
 
 def create_udp_socket():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -128,7 +296,9 @@ def send_udp_message(message, ip=BROADCAST_IP, port=UDP_PORT):
 def send_discovery():
     message = {
         "type": "DISCOVERY",
+        "Action": "Discovery",
         "sender": hub_name,
+        "Hub_Name": hub_name,
         "role": "hub",
         "port": UDP_PORT
     }
@@ -139,11 +309,20 @@ def send_discovery():
 def send_ping_to_device(ip):
     message = {
         "type": "PING",
+        "Action": "Heartbeat",
         "sender": hub_name,
+        "Hub_Name": hub_name,
         "role": "hub"
     }
 
     send_udp_message(message, ip=ip)
+
+
+def is_discovery_response(message):
+    msg_type = message.get("type", "")
+    action = message.get("Action", "")
+
+    return msg_type == "DISCOVERY_RESPONSE" or action == "Discovery_Response"
 
 
 def handle_udp_message(data, address):
@@ -158,13 +337,30 @@ def handle_udp_message(data, address):
         return
 
     msg_type = message.get("type", "")
+    action = message.get("Action", "")
 
-    if msg_type in ["DISCOVERY_RESPONSE", "PONG", "STATUS"]:
-        name = message.get("name", "Unknown ESP")
-        status = message.get("status", "unknown")
+    if is_discovery_response(message):
+        name = message.get("device_name") or message.get("name") or "Unknown ESP"
+        device_data = update_known_device(name, ip, message)
 
         with devices_lock:
-            devices[ip] = {
+            devices[name] = {
+                "name": name,
+                "ip": ip,
+                "status": device_data.get("Status_base", "Online"),
+                "last_seen": time.time(),
+                "raw": device_data
+            }
+
+        print(f"Discovery synced: {name} at {ip}")
+        needs_display_update = True
+
+    elif msg_type in ["PONG", "STATUS"] or action == "Heartbeat":
+        name = message.get("device_name") or message.get("name") or ip
+        status = message.get("status") or message.get("Status_base") or "Online"
+
+        with devices_lock:
+            devices[name] = {
                 "name": name,
                 "ip": ip,
                 "status": status,
@@ -216,22 +412,20 @@ def heartbeat_thread():
         now = time.time()
 
         with devices_lock:
-            for ip in list(devices.keys()):
-                age = now - devices[ip]["last_seen"]
+            for device_name in list(devices.keys()):
+                age = now - devices[device_name]["last_seen"]
 
                 if age > DEVICE_TIMEOUT:
-                    print("Removing stale device:", devices[ip]["name"])
-                    del devices[ip]
+                    print("Marking stale device offline:", devices[device_name]["name"])
+                    devices[device_name]["status"] = "Offline"
+                    devices[device_name]["raw"]["Status_base"] = "Offline"
+                    sync_device_to_firebase(device_name, devices[device_name]["raw"])
                     needs_display_update = True
                 else:
-                    send_ping_to_device(ip)
+                    send_ping_to_device(devices[device_name]["ip"])
 
         time.sleep(DISCOVERY_INTERVAL)
 
-
-# ------------------------------------------------------------
-# Button setup and reading
-# ------------------------------------------------------------
 
 def setup_buttons():
     GPIO.setmode(GPIO.BCM)
@@ -313,14 +507,10 @@ def check_buttons():
         needs_display_update = True
 
 
-# ------------------------------------------------------------
-# Display functions
-# ------------------------------------------------------------
-
 def get_font(size):
     possible_fonts = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "fonts/Font.ttc"
     ]
 
@@ -332,70 +522,90 @@ def get_font(size):
 
 
 def draw_header(draw, title, font):
-    draw.rectangle((0, 0, DISPLAY_WIDTH, 35), fill=0)
-    draw.text((10, 8), title, font=font, fill=255)
+    draw.rectangle((0, 0, DISPLAY_WIDTH, HEADER_HEIGHT), fill=0)
+    draw.text((10, 10), title, font=font, fill=255)
 
 
 def draw_main_menu(draw):
-    title_font = get_font(18)
-    item_font = get_font(22)
+    title_font = get_font(FONT_HEADER)
+    item_font = get_font(FONT_MAIN_ITEM)
 
     draw_header(draw, hub_name, title_font)
 
-    y = 55
+    y = 65
 
     for i, item in enumerate(main_menu):
         prefix = "> " if i == selected_index else "  "
-        draw.text((25, y), prefix + item, font=item_font, fill=0)
-        y += 42
+        draw.text((20, y), prefix + item, font=item_font, fill=0)
+        y += 48
 
 
 def draw_devices_menu(draw):
-    title_font = get_font(18)
-    item_font = get_font(20)
-    small_font = get_font(15)
+    title_font = get_font(FONT_HEADER)
+    item_font = get_font(FONT_ITEM)
+    small_font = get_font(FONT_SMALL)
 
-    draw_header(draw, "Devices - Select to return", title_font)
+    draw_header(draw, "Devices", title_font)
 
     with devices_lock:
         device_list = list(devices.values())
 
     if not device_list:
-        draw.text((25, 70), "No devices discovered yet.", font=item_font, fill=0)
-        draw.text((25, 105), "Return and choose Discover.", font=small_font, fill=0)
+        draw.text((25, 75), "No devices found.", font=item_font, fill=0)
+        draw.text((25, 115), "Use Discover Devices.", font=small_font, fill=0)
+        draw.text((25, 250), "SELECT: back", font=small_font, fill=0)
         return
 
     index = submenu_index % len(device_list)
     device = device_list[index]
+    raw = device.get("raw", {})
+    node_l = raw.get("Node_L", {})
+    node_r = raw.get("Node_R", {})
 
-    draw.text((25, 60), f"Device {index + 1} of {len(device_list)}", font=small_font, fill=0)
-    draw.text((25, 95), f"Name: {device['name']}", font=item_font, fill=0)
-    draw.text((25, 130), f"IP: {device['ip']}", font=item_font, fill=0)
-    draw.text((25, 165), f"Status: {device['status']}", font=item_font, fill=0)
+    draw.text((25, 60), f"Device {index + 1}/{len(device_list)}", font=small_font, fill=0)
+    draw.text((25, 88), f"Name: {device['name']}", font=item_font, fill=0)
+    draw.text((25, 122), f"IP: {device['ip']}", font=item_font, fill=0)
+    draw.text((25, 156), f"Status: {device['status']}", font=item_font, fill=0)
+
+    draw.text(
+        (25, 190),
+        f"L: A={node_l.get('Attached')} P={node_l.get('Power')}",
+        font=item_font,
+        fill=0
+    )
+
+    draw.text(
+        (25, 224),
+        f"R: A={node_r.get('Attached')} P={node_r.get('Power')}",
+        font=item_font,
+        fill=0
+    )
 
     last_seen = int(time.time() - device["last_seen"])
-    draw.text((25, 200), f"Last seen: {last_seen} sec ago", font=item_font, fill=0)
 
-    draw.text((25, 250), "LEFT/RIGHT: switch device", font=small_font, fill=0)
+    draw.text((25, 258), f"Seen: {last_seen}s   L/R: switch", font=small_font, fill=0)
 
 
 def draw_settings_menu(draw):
-    title_font = get_font(18)
-    item_font = get_font(20)
+    title_font = get_font(FONT_HEADER)
+    item_font = get_font(FONT_ITEM)
+    small_font = get_font(FONT_SMALL)
 
     draw_header(draw, "Hub Settings", title_font)
 
-    draw.text((25, 70), f"Hub Name:", font=item_font, fill=0)
+    draw.text((25, 70), "Hub Name:", font=item_font, fill=0)
     draw.text((25, 105), hub_name, font=item_font, fill=0)
 
-    draw.text((25, 170), "Rename is handled by UDP:", font=item_font, fill=0)
-    draw.text((25, 205), '{"type":"RENAME_HUB",', font=item_font, fill=0)
-    draw.text((25, 235), '"new_name":"New Name"}', font=item_font, fill=0)
+    draw.text((25, 165), "Rename over UDP:", font=item_font, fill=0)
+    draw.text((25, 205), '{"type":"RENAME_HUB",', font=small_font, fill=0)
+    draw.text((25, 235), '"new_name":"New Name"}', font=small_font, fill=0)
+    draw.text((25, 265), "SELECT: back", font=small_font, fill=0)
 
 
 def draw_network_menu(draw):
-    title_font = get_font(18)
-    item_font = get_font(20)
+    title_font = get_font(FONT_HEADER)
+    item_font = get_font(FONT_ITEM)
+    small_font = get_font(FONT_SMALL)
 
     draw_header(draw, "Network Status", title_font)
 
@@ -404,22 +614,25 @@ def draw_network_menu(draw):
     with devices_lock:
         count = len(devices)
 
-    draw.text((25, 70), f"Hub IP: {local_ip}", font=item_font, fill=0)
-    draw.text((25, 110), f"UDP Port: {UDP_PORT}", font=item_font, fill=0)
-    draw.text((25, 150), f"Devices: {count}", font=item_font, fill=0)
-    draw.text((25, 190), f"Broadcast: {BROADCAST_IP}", font=item_font, fill=0)
+    draw.text((25, 70), f"Hub IP:", font=item_font, fill=0)
+    draw.text((25, 105), local_ip, font=item_font, fill=0)
+    draw.text((25, 145), f"UDP Port: {UDP_PORT}", font=item_font, fill=0)
+    draw.text((25, 185), f"Devices: {count}", font=item_font, fill=0)
+    draw.text((25, 225), f"Broadcast: {BROADCAST_IP}", font=small_font, fill=0)
+    draw.text((25, 265), "SELECT: back", font=small_font, fill=0)
 
 
 def draw_about_menu(draw):
-    title_font = get_font(18)
-    item_font = get_font(20)
+    title_font = get_font(FONT_HEADER)
+    item_font = get_font(FONT_ITEM)
+    small_font = get_font(FONT_SMALL)
 
     draw_header(draw, "About", title_font)
 
     draw.text((25, 70), "Senior Design Hub", font=item_font, fill=0)
-    draw.text((25, 110), "UDP Discovery System", font=item_font, fill=0)
-    draw.text((25, 150), "Raspberry Pi + ESP32", font=item_font, fill=0)
-    draw.text((25, 210), "SELECT returns to menu", font=item_font, fill=0)
+    draw.text((25, 115), "UDP Discovery", font=item_font, fill=0)
+    draw.text((25, 160), "Pi + ESP32", font=item_font, fill=0)
+    draw.text((25, 230), "SELECT: back", font=small_font, fill=0)
 
 
 def get_local_ip():
@@ -476,16 +689,15 @@ def update_display(epd):
     epd.display(epd.getbuffer(image))
 
 
-# ------------------------------------------------------------
-# Main program
-# ------------------------------------------------------------
-
 def main():
     global udp_socket
     global needs_display_update
     global running
 
     load_hub_name()
+    init_firebase()
+    ensure_firebase_hub_branch()
+    load_known_devices_into_memory()
     setup_buttons()
 
     udp_socket = create_udp_socket()
