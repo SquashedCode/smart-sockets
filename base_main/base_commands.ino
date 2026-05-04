@@ -4,8 +4,8 @@
 // Node_L: Out=0, In=1
 // Node_R: Out=6, In=5
 // NONE (Main): Out=2, In=None
-const int OUT_PINS[3] = {0, 6, 2}; 
-const int IN_PINS[3]  = {1, 7, -1}; // -1 means no sensor
+const int OUT_PINS[3] = {1, 6, 2}; 
+const int IN_PINS[3]  = {0, 7, -1}; // -1 means no sensor
 
 const int LED_PIN = 4;
 const int NUM_PIXELS = 2;
