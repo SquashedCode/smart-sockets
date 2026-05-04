@@ -53,6 +53,10 @@ SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
 USER_NAME = "user"
 HUB_INFO_KEY = "_hub_info"
 
+# Use "commands" instead if your Firebase tree is lowercase.
+COMMANDS_PATH = "Commands"
+COMMAND_POLL_INTERVAL = 1.0
+
 DISCOVERY_INTERVAL = 5
 DEVICE_TIMEOUT = 20
 
@@ -148,7 +152,7 @@ def debug_print_packet(data, address):
 
     action = clean_lower_string(message.get("action", ""))
 
-    if action != "discovery_response":
+    if action not in ["discovery_response", "command_response"]:
         return
 
     print("\n================ UDP PACKET ================")
@@ -334,6 +338,138 @@ def load_devices_from_firebase():
 
 
 #------------------------------------------------------------
+# FIREBASE COMMAND HANDLING
+#------------------------------------------------------------
+
+def get_oldest_pending_command():
+    if firebase_admin is None or not firebase_admin._apps:
+        return None, None
+
+    try:
+        commands = db.reference(COMMANDS_PATH).get()
+    except Exception as error:
+        print("could not read commands:", error)
+        return None, None
+
+    if not commands:
+        return None, None
+
+    pending_commands = []
+
+    for command_id, command_data in commands.items():
+        if not isinstance(command_data, dict):
+            continue
+
+        status = clean_lower_string(command_data.get("Status", ""))
+        command_hub = clean_lower_string(command_data.get("Hub", ""))
+
+        if status == "pending" and command_hub == hub_name:
+            pending_commands.append((command_id, command_data))
+
+    if not pending_commands:
+        return None, None
+
+    def command_time(item):
+        try:
+            return float(item[1].get("Time", 0))
+        except Exception:
+            return 0
+
+    pending_commands.sort(key=command_time)
+
+    return pending_commands[0]
+
+
+def update_command_status(command_id, status):
+    if firebase_admin is None or not firebase_admin._apps:
+        return
+
+    try:
+        db.reference(f"{COMMANDS_PATH}/{command_id}/Status").set(status)
+    except Exception as error:
+        print("could not update command status:", error)
+
+
+def make_udp_command_packet(command_id, command_data):
+    return {
+        "action": clean_lower_string(command_data.get("Action", "")),
+        "command_id": command_id,
+        "hub_name": clean_lower_string(command_data.get("Hub", hub_name)),
+        "base": clean_lower_string(command_data.get("Base", "")),
+        "node": clean_string(command_data.get("Node", "ALL")),
+        "value": clean_string(command_data.get("Value", "")),
+        "port": str(UDP_PORT)
+    }
+
+
+def get_base_ip_from_runtime_or_firebase(base_name):
+    base_name = clean_lower_string(base_name)
+
+    with devices_lock:
+        if base_name in devices:
+            ip = devices[base_name].get("ip", "")
+            status = clean_lower_string(devices[base_name].get("status", ""))
+
+            if ip and ip != "unknown" and status != "offline":
+                return ip
+
+    if firebase_admin is None or not firebase_admin._apps:
+        return None
+
+    try:
+        device_data = db.reference(f"DeviceList/{USER_NAME}/{hub_name}/{base_name}").get()
+    except Exception as error:
+        print("could not check firebase device list:", error)
+        return None
+
+    if not device_data:
+        return None
+
+    ip = clean_string(device_data.get("ip", ""))
+    status = clean_lower_string(device_data.get("Status_base", ""))
+
+    if ip and ip != "unknown" and status != "offline":
+        return ip
+
+    return None
+
+
+def process_pending_command(command_id, command_data):
+    base_name = clean_lower_string(command_data.get("Base", ""))
+
+    if not base_name:
+        print("pending command missing Base field:", command_id)
+        update_command_status(command_id, "Error")
+        return
+
+    packet = make_udp_command_packet(command_id, command_data)
+
+    update_command_status(command_id, "Processing")
+
+    base_ip = get_base_ip_from_runtime_or_firebase(base_name)
+
+    if base_ip:
+        print(f"sending command {command_id} directly to {base_name} at {base_ip}")
+        send_udp_message(packet, ip=base_ip)
+    else:
+        print(f"{base_name} not found in device list, broadcasting command {command_id}")
+        packet["broadcast_lookup"] = "true"
+        send_udp_message(packet, ip=BROADCAST_IP)
+
+
+def command_poll_thread():
+    global running
+
+    while running:
+        command_id, command_data = get_oldest_pending_command()
+
+        if command_id and command_data:
+            process_pending_command(command_id, command_data)
+
+        time.sleep(COMMAND_POLL_INTERVAL)
+
+
+#------------------------------------------------------------
 # HUB NAME STORAGE
 #------------------------------------------------------------
 
@@ -375,6 +511,10 @@ def create_udp_socket():
 
 def send_udp_message(message, ip=BROADCAST_IP, port=UDP_PORT):
     global udp_socket
+
+    if udp_socket is None:
+        print("udp socket is not ready")
+        return
 
     data = json.dumps(message).encode("utf-8")
     udp_socket.sendto(data, (ip, port))
@@ -453,6 +593,39 @@ def handle_udp_message(data, address):
 
         print(f"discovery response synced: {name} at {ip}")
         needs_display_update = True
+
+    elif action == "command_response":
+        command_id = clean_string(message.get("command_id", ""))
+        base_name = (
+            message.get("base")
+            or message.get("device_name")
+            or message.get("name")
+            or ""
+        )
+
+        base_name = clean_lower_string(base_name)
+        response_status = clean_lower_string(message.get("status", ""))
+
+        if base_name:
+            device_data = save_device_to_firebase(base_name, ip, message)
+
+            with devices_lock:
+                devices[base_name] = {
+                    "name": base_name,
+                    "ip": ip,
+                    "status": device_data.get("status_base", "online"),
+                    "last_seen": time.time(),
+                    "raw": device_data
+                }
+
+            print(f"command response synced: {base_name} at {ip}")
+            needs_display_update = True
+
+        if command_id:
+            if response_status in ["success", "successful", "complete", "completed"]:
+                update_command_status(command_id, "Complete")
+            else:
+                update_command_status(command_id, "Error")
 
     elif message.get("type", "") == "rename_hub":
         new_name = message.get("new_name")
@@ -803,6 +976,7 @@ def main():
 
     threading.Thread(target=udp_listener_thread, daemon=True).start()
     threading.Thread(target=discovery_thread, daemon=True).start()
+    threading.Thread(target=command_poll_thread, daemon=True).start()
 
     print("hub started")
     print("hub name:", hub_name)
