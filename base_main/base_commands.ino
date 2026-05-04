@@ -17,15 +17,15 @@ void setupPins() {
   updateLEDStatus("IDLE");
   
   for(int i = 0; i < 3; i++) {
+    digitalWrite(OUT_PINS[i], LOW); 
     pinMode(OUT_PINS[i], OUTPUT);
-    digitalWrite(OUT_PINS[i], HIGH); // Active Low: HIGH is OFF
-    // Configure Input Pins
+    
     if (IN_PINS[i] != -1) {
       pinMode(IN_PINS[i], INPUT_PULLUP); // Assumes sensor pulls to GND
     }
   }
 }
-
+extern bool isDiscovered;
 void updateLEDStatus(String status) {
   uint32_t color;
   if (status == "IDLE")      color = pixels.Color(255, 255, 255);
@@ -40,25 +40,24 @@ void updateLEDStatus(String status) {
 }
 
 void executeCommand(String target, String value) {
-  // Assuming Active Low: "High" command turns ON (LOW signal)
-  int signal = (value.equalsIgnoreCase("High")) ? LOW : HIGH;
+  // CRITICAL: If not discovered, do absolutely nothing
+  if (!isDiscovered) {
+    Serial.println("BLOCKED: Command ignored. Base not discovered yet.");
+    return;
+  }
 
-  // Node_A = All Nodes
-  if (target == "Node_A") {
-    Serial.println("GLOBAL COMMAND: Toggling all nodes to " + value);
+  int signal = (value.equalsIgnoreCase("high")) ? LOW : HIGH;
+
+  if (target == "node_A") {
     for(int i = 0; i < 3; i++) digitalWrite(OUT_PINS[i], signal);
   } 
-  // Specific Node Routing
   else {
     int pinIdx = -1;
-    if (target == "Node_L") pinIdx = 0;
-    else if (target == "Node_R") pinIdx = 1;
-    else if (target == "Node_C") pinIdx = 2;
+    if (target == "node_L") pinIdx = 0;
+    else if (target == "node_R") pinIdx = 1;
+    else if (target == "node_C") pinIdx = 2;
 
-    if (pinIdx != -1) {
-      Serial.println("NODE COMMAND: Setting " + target + " to " + value);
-      digitalWrite(OUT_PINS[pinIdx], signal);
-    }
+    if (pinIdx != -1) digitalWrite(OUT_PINS[pinIdx], signal);
   }
 }
 
@@ -72,5 +71,5 @@ bool isNodeOn(int index) {
 }
 
 void triggerTotalShutdown() {
-  for(int i = 0; i < 3; i++) digitalWrite(OUT_PINS[i], HIGH);
+  for(int i = 0; i < 3; i++) digitalWrite(OUT_PINS[i], LOW);
 }
