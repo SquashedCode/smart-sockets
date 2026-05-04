@@ -40,7 +40,6 @@ void updateLEDStatus(String status) {
 }
 
 void executeCommand(String target, String value) {
-  // CRITICAL: If not discovered, do absolutely nothing
   if (!isDiscovered) {
     Serial.println("BLOCKED: Command ignored. Base not discovered yet.");
     return;
@@ -48,14 +47,14 @@ void executeCommand(String target, String value) {
 
   int signal = (value.equalsIgnoreCase("high")) ? LOW : HIGH;
 
-  if (target == "node_A") {
+  if (target == "node_a") {
     for(int i = 0; i < 3; i++) digitalWrite(OUT_PINS[i], signal);
   } 
   else {
     int pinIdx = -1;
-    if (target == "node_L") pinIdx = 0;
-    else if (target == "node_R") pinIdx = 1;
-    else if (target == "node_C") pinIdx = 2;
+    if (target == "node_l") pinIdx = 0;
+    else if (target == "node_r") pinIdx = 1;
+    else if (target == "node_c") pinIdx = 2;
 
     if (pinIdx != -1) digitalWrite(OUT_PINS[pinIdx], signal);
   }
