@@ -5,10 +5,14 @@ import json
 import time
 import threading
 import os
-from datetime import datetime
 
 import RPi.GPIO as GPIO
 from PIL import Image, ImageDraw, ImageFont
+
+
+#------------------------------------------------------------
+# FIREBASE IMPORT
+#------------------------------------------------------------
 
 try:
     import firebase_admin
@@ -19,6 +23,11 @@ except ImportError:
     credentials = None
     db = None
 
+
+#------------------------------------------------------------
+# WAVESHARE IMPORT
+#------------------------------------------------------------
+
 try:
     from waveshare_epd import epd4in2_V2 as epd_driver
 except ImportError:
@@ -27,6 +36,10 @@ except ImportError:
     except ImportError:
         epd_driver = None
 
+
+#------------------------------------------------------------
+# BASIC CONFIGURATION
+#------------------------------------------------------------
 
 UDP_PORT = 50000
 BROADCAST_IP = "255.255.255.255"
@@ -37,21 +50,20 @@ DEFAULT_HUB_NAME = "Hub_1"
 DATABASE_URL = "https://team-socket-default-rtdb.firebaseio.com/"
 SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
 KNOWN_DEVICES_FILE = "known_devices.json"
+
 USER_NAME = "User"
 HUB_INFO_KEY = "_Hub_Info"
 
-DISCOVERY_INTERVAL = 60
-DEVICE_TIMEOUT = 180
+DISCOVERY_INTERVAL = 5
+DEVICE_TIMEOUT = 20
 
 DISPLAY_WIDTH = 400
 DISPLAY_HEIGHT = 300
 
-# Larger font sizes for Waveshare 4.2 inch e-paper display
 FONT_HEADER = 26
 FONT_MAIN_ITEM = 30
 FONT_ITEM = 26
 FONT_SMALL = 18
-
 HEADER_HEIGHT = 48
 
 BUTTON_UP = 5
@@ -68,6 +80,10 @@ BUTTON_PINS = [
     BUTTON_SELECT
 ]
 
+
+#------------------------------------------------------------
+# HUB STATE
+#------------------------------------------------------------
 
 hub_name = DEFAULT_HUB_NAME
 devices = {}
@@ -87,7 +103,12 @@ main_menu = [
 
 needs_display_update = True
 running = True
+udp_socket = None
 
+
+#------------------------------------------------------------
+# FIREBASE SETUP
+#------------------------------------------------------------
 
 def init_firebase():
     if firebase_admin is None:
@@ -106,31 +127,6 @@ def init_firebase():
 
     print("Connected to Firebase")
     return True
-
-
-def load_known_devices_file():
-    if not os.path.exists(KNOWN_DEVICES_FILE):
-        return {
-            "Hub_Name": hub_name,
-            "devices": {}
-        }
-
-    try:
-        with open(KNOWN_DEVICES_FILE, "r") as file:
-            return json.load(file)
-    except json.JSONDecodeError:
-        print("known_devices.json is invalid. Starting with an empty list.")
-        return {
-            "Hub_Name": hub_name,
-            "devices": {}
-        }
-
-
-def save_known_devices_file(known_data):
-    known_data["Hub_Name"] = hub_name
-
-    with open(KNOWN_DEVICES_FILE, "w") as file:
-        json.dump(known_data, file, indent=2)
 
 
 def make_firebase_safe_device_data(device_data):
@@ -190,6 +186,35 @@ def sync_device_to_firebase(device_name, device_data):
         print(f"Could not sync {device_name} to Firebase:", error)
 
 
+#------------------------------------------------------------
+# KNOWN DEVICE STORAGE
+#------------------------------------------------------------
+
+def load_known_devices_file():
+    if not os.path.exists(KNOWN_DEVICES_FILE):
+        return {
+            "Hub_Name": hub_name,
+            "devices": {}
+        }
+
+    try:
+        with open(KNOWN_DEVICES_FILE, "r") as file:
+            return json.load(file)
+    except json.JSONDecodeError:
+        print("known_devices.json is invalid. Starting with an empty list.")
+        return {
+            "Hub_Name": hub_name,
+            "devices": {}
+        }
+
+
+def save_known_devices_file(known_data):
+    known_data["Hub_Name"] = hub_name
+
+    with open(KNOWN_DEVICES_FILE, "w") as file:
+        json.dump(known_data, file, indent=2)
+
+
 def build_device_data(device_name, device_ip, message):
     node_l = message.get("Node_L", {
         "Attached": False,
@@ -214,6 +239,7 @@ def build_device_data(device_name, device_ip, message):
 def update_known_device(device_name, device_ip, message):
     known_data = load_known_devices_file()
     known_devices = known_data["devices"]
+
     device_data = build_device_data(device_name, device_ip, message)
 
     if device_name in known_devices:
@@ -227,6 +253,7 @@ def update_known_device(device_name, device_ip, message):
         print(f"New device discovered: {device_name}")
 
     known_devices[device_name] = device_data
+
     save_known_devices_file(known_data)
     sync_device_to_firebase(device_name, device_data)
 
@@ -254,6 +281,10 @@ def load_known_devices_into_memory():
     needs_display_update = True
 
 
+#------------------------------------------------------------
+# HUB NAME STORAGE
+#------------------------------------------------------------
+
 def load_hub_name():
     global hub_name
 
@@ -274,16 +305,20 @@ def save_hub_name(new_name):
         file.write(hub_name)
 
 
+#------------------------------------------------------------
+# UDP SOCKET FUNCTIONS
+#------------------------------------------------------------
+
 def create_udp_socket():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
     sock.bind(("", UDP_PORT))
     sock.settimeout(0.5)
+
     return sock
-
-
-udp_socket = None
 
 
 def send_udp_message(message, ip=BROADCAST_IP, port=UDP_PORT):
@@ -293,37 +328,46 @@ def send_udp_message(message, ip=BROADCAST_IP, port=UDP_PORT):
     udp_socket.sendto(data, (ip, port))
 
 
+def get_local_ip():
+    try:
+        test_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        test_socket.connect(("8.8.8.8", 80))
+        ip = test_socket.getsockname()[0]
+        test_socket.close()
+        return ip
+    except Exception:
+        return "Unavailable"
+
+
+#------------------------------------------------------------
+# DISCOVERY PACKET
+#------------------------------------------------------------
+
 def send_discovery():
     message = {
-        "type": "DISCOVERY",
+        "Hub_name": hub_name,
+        "Hub_IP": get_local_ip(),
         "Action": "Discovery",
-        "sender": hub_name,
-        "Hub_Name": hub_name,
-        "role": "hub",
         "port": UDP_PORT
     }
 
     send_udp_message(message)
 
 
-def send_ping_to_device(ip):
-    message = {
-        "type": "PING",
-        "Action": "Heartbeat",
-        "sender": hub_name,
-        "Hub_Name": hub_name,
-        "role": "hub"
-    }
-
-    send_udp_message(message, ip=ip)
-
-
 def is_discovery_response(message):
-    msg_type = message.get("type", "")
     action = message.get("Action", "")
+    msg_type = message.get("type", "")
 
-    return msg_type == "DISCOVERY_RESPONSE" or action == "Discovery_Response"
+    return (
+        action == "Discovery_Response"
+        or action == "DiscoveryResponse"
+        or msg_type == "DISCOVERY_RESPONSE"
+    )
 
+
+#------------------------------------------------------------
+# UDP MESSAGE HANDLING
+#------------------------------------------------------------
 
 def handle_udp_message(data, address):
     global needs_display_update
@@ -336,11 +380,14 @@ def handle_udp_message(data, address):
         print("Received non-JSON packet from", ip)
         return
 
-    msg_type = message.get("type", "")
-    action = message.get("Action", "")
-
     if is_discovery_response(message):
-        name = message.get("device_name") or message.get("name") or "Unknown ESP"
+        name = (
+            message.get("device_name")
+            or message.get("Base")
+            or message.get("name")
+            or "Unknown ESP"
+        )
+
         device_data = update_known_device(name, ip, message)
 
         with devices_lock:
@@ -352,26 +399,10 @@ def handle_udp_message(data, address):
                 "raw": device_data
             }
 
-        print(f"Discovery synced: {name} at {ip}")
+        print(f"Discovery response synced: {name} at {ip}")
         needs_display_update = True
 
-    elif msg_type in ["PONG", "STATUS"] or action == "Heartbeat":
-        name = message.get("device_name") or message.get("name") or ip
-        status = message.get("status") or message.get("Status_base") or "Online"
-
-        with devices_lock:
-            devices[name] = {
-                "name": name,
-                "ip": ip,
-                "status": status,
-                "last_seen": time.time(),
-                "raw": message
-            }
-
-        print(f"Device updated: {name} at {ip}, status={status}")
-        needs_display_update = True
-
-    elif msg_type == "RENAME_HUB":
+    elif message.get("type", "") == "RENAME_HUB":
         new_name = message.get("new_name")
 
         if new_name:
@@ -380,7 +411,7 @@ def handle_udp_message(data, address):
             needs_display_update = True
 
     else:
-        print("Unknown message from", ip, message)
+        print("Unknown UDP message from", ip, message)
 
 
 def udp_listener_thread():
@@ -396,36 +427,43 @@ def udp_listener_thread():
             print("UDP listener error:", error)
 
 
+#------------------------------------------------------------
+# DISCOVERY HEARTBEAT THREAD
+#------------------------------------------------------------
+
 def discovery_thread():
     global running
 
     while running:
         send_discovery()
+        check_for_offline_devices()
         time.sleep(DISCOVERY_INTERVAL)
 
 
-def heartbeat_thread():
-    global running
+def check_for_offline_devices():
     global needs_display_update
 
-    while running:
-        now = time.time()
+    now = time.time()
 
-        with devices_lock:
-            for device_name in list(devices.keys()):
-                age = now - devices[device_name]["last_seen"]
+    with devices_lock:
+        for device_name in list(devices.keys()):
+            age = now - devices[device_name]["last_seen"]
 
-                if age > DEVICE_TIMEOUT:
+            if age > DEVICE_TIMEOUT:
+                if devices[device_name]["status"] != "Offline":
                     print("Marking stale device offline:", devices[device_name]["name"])
+
                     devices[device_name]["status"] = "Offline"
                     devices[device_name]["raw"]["Status_base"] = "Offline"
+
                     sync_device_to_firebase(device_name, devices[device_name]["raw"])
+
                     needs_display_update = True
-                else:
-                    send_ping_to_device(devices[device_name]["ip"])
 
-        time.sleep(DISCOVERY_INTERVAL)
 
+#------------------------------------------------------------
+# BUTTON SETUP AND READING
+#------------------------------------------------------------
 
 def setup_buttons():
     GPIO.setmode(GPIO.BCM)
@@ -507,6 +545,10 @@ def check_buttons():
         needs_display_update = True
 
 
+#------------------------------------------------------------
+# FONT FUNCTIONS
+#------------------------------------------------------------
+
 def get_font(size):
     possible_fonts = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -518,8 +560,13 @@ def get_font(size):
         if os.path.exists(path):
             return ImageFont.truetype(path, size)
 
+    print("WARNING: Using tiny default PIL font")
     return ImageFont.load_default()
 
+
+#------------------------------------------------------------
+# DISPLAY DRAWING FUNCTIONS
+#------------------------------------------------------------
 
 def draw_header(draw, title, font):
     draw.rectangle((0, 0, DISPLAY_WIDTH, HEADER_HEIGHT), fill=0)
@@ -558,6 +605,7 @@ def draw_devices_menu(draw):
 
     index = submenu_index % len(device_list)
     device = device_list[index]
+
     raw = device.get("raw", {})
     node_l = raw.get("Node_L", {})
     node_r = raw.get("Node_R", {})
@@ -582,7 +630,6 @@ def draw_devices_menu(draw):
     )
 
     last_seen = int(time.time() - device["last_seen"])
-
     draw.text((25, 258), f"Seen: {last_seen}s   L/R: switch", font=small_font, fill=0)
 
 
@@ -614,7 +661,7 @@ def draw_network_menu(draw):
     with devices_lock:
         count = len(devices)
 
-    draw.text((25, 70), f"Hub IP:", font=item_font, fill=0)
+    draw.text((25, 70), "Hub IP:", font=item_font, fill=0)
     draw.text((25, 105), local_ip, font=item_font, fill=0)
     draw.text((25, 145), f"UDP Port: {UDP_PORT}", font=item_font, fill=0)
     draw.text((25, 185), f"Devices: {count}", font=item_font, fill=0)
@@ -635,17 +682,6 @@ def draw_about_menu(draw):
     draw.text((25, 230), "SELECT: back", font=small_font, fill=0)
 
 
-def get_local_ip():
-    try:
-        test_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        test_socket.connect(("8.8.8.8", 80))
-        ip = test_socket.getsockname()[0]
-        test_socket.close()
-        return ip
-    except Exception:
-        return "Unavailable"
-
-
 def render_display_image():
     image = Image.new("1", (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
     draw = ImageDraw.Draw(image)
@@ -664,6 +700,10 @@ def render_display_image():
     return image
 
 
+#------------------------------------------------------------
+# DISPLAY SETUP AND UPDATE
+#------------------------------------------------------------
+
 def setup_display():
     if epd_driver is None:
         print("Waveshare display driver not found. Running in terminal-only mode.")
@@ -672,6 +712,7 @@ def setup_display():
     epd = epd_driver.EPD()
     epd.init()
     epd.Clear()
+
     return epd
 
 
@@ -689,6 +730,10 @@ def update_display(epd):
     epd.display(epd.getbuffer(image))
 
 
+#------------------------------------------------------------
+# MAIN PROGRAM
+#------------------------------------------------------------
+
 def main():
     global udp_socket
     global needs_display_update
@@ -701,12 +746,10 @@ def main():
     setup_buttons()
 
     udp_socket = create_udp_socket()
-
     epd = setup_display()
 
     threading.Thread(target=udp_listener_thread, daemon=True).start()
     threading.Thread(target=discovery_thread, daemon=True).start()
-    threading.Thread(target=heartbeat_thread, daemon=True).start()
 
     print("Hub started.")
     print("Hub name:", hub_name)
