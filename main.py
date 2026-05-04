@@ -49,7 +49,6 @@ DEFAULT_HUB_NAME = "Hub_1"
 
 DATABASE_URL = "https://team-socket-default-rtdb.firebaseio.com/"
 SERVICE_ACCOUNT_FILE = "serviceAccountKey.json"
-KNOWN_DEVICES_FILE = "known_devices.json"
 
 USER_NAME = "User"
 HUB_INFO_KEY = "_Hub_Info"
@@ -185,42 +184,15 @@ def sync_device_to_firebase(device_name, device_data):
     except Exception as error:
         print(f"Could not sync {device_name} to Firebase:", error)
 
-
 #------------------------------------------------------------
 # KNOWN DEVICE STORAGE
 #------------------------------------------------------------
-
-def load_known_devices_file():
-    if not os.path.exists(KNOWN_DEVICES_FILE):
-        return {
-            "Hub_Name": hub_name,
-            "devices": {}
-        }
-
-    try:
-        with open(KNOWN_DEVICES_FILE, "r") as file:
-            return json.load(file)
-    except json.JSONDecodeError:
-        print("known_devices.json is invalid. Starting with an empty list.")
-        return {
-            "Hub_Name": hub_name,
-            "devices": {}
-        }
-
-
-def save_known_devices_file(known_data):
-    known_data["Hub_Name"] = hub_name
-
-    with open(KNOWN_DEVICES_FILE, "w") as file:
-        json.dump(known_data, file, indent=2)
-
 
 def build_device_data(device_name, device_ip, message):
     node_l = message.get("Node_L", {
         "Attached": False,
         "Power": False
     })
-
     node_r = message.get("Node_R", {
         "Attached": False,
         "Power": False
@@ -230,56 +202,46 @@ def build_device_data(device_name, device_ip, message):
         "name": device_name,
         "ip": device_ip,
         "Status_base": "Online",
-        "last_seen": str(time.time()),
         "Node_L": node_l,
         "Node_R": node_r
     }
 
 
-def update_known_device(device_name, device_ip, message):
-    known_data = load_known_devices_file()
-    known_devices = known_data["devices"]
-
+def save_device_to_firebase(device_name, device_ip, message):
     device_data = build_device_data(device_name, device_ip, message)
 
-    if device_name in known_devices:
-        old_ip = known_devices[device_name].get("ip")
-
-        if old_ip != device_ip:
-            print(f"{device_name} IP updated: {old_ip} -> {device_ip}")
-        else:
-            print(f"{device_name} already known")
-    else:
-        print(f"New device discovered: {device_name}")
-
-    known_devices[device_name] = device_data
-
-    save_known_devices_file(known_data)
     sync_device_to_firebase(device_name, device_data)
 
     return device_data
 
 
-def load_known_devices_into_memory():
+def load_devices_from_firebase():
     global devices
     global needs_display_update
 
-    known_data = load_known_devices_file()
+    if firebase_admin is None or not firebase_admin._apps:
+        return
+
+    ref_path = f"DeviceList/{USER_NAME}/{hub_name}"
+    firebase_devices = db.reference(ref_path).get()
 
     with devices_lock:
         devices = {}
 
-        for device_name, device_data in known_data.get("devices", {}).items():
-            devices[device_name] = {
-                "name": device_data.get("name", device_name),
-                "ip": device_data.get("ip", "Unknown"),
-                "status": device_data.get("Status_base", "Unknown"),
-                "last_seen": float(device_data.get("last_seen", time.time())),
-                "raw": device_data
-            }
+        if firebase_devices:
+            for device_name, device_data in firebase_devices.items():
+                if device_name == HUB_INFO_KEY:
+                    continue
+
+                devices[device_name] = {
+                    "name": device_data.get("name", device_name),
+                    "ip": device_data.get("ip", "Unknown"),
+                    "status": device_data.get("Status_base", "Unknown"),
+                    "last_seen": time.time(),
+                    "raw": device_data
+                }
 
     needs_display_update = True
-
 
 #------------------------------------------------------------
 # HUB NAME STORAGE
@@ -388,7 +350,7 @@ def handle_udp_message(data, address):
             or "Unknown ESP"
         )
 
-        device_data = update_known_device(name, ip, message)
+        device_data = save_device_to_firebase(name, ip, message)
 
         with devices_lock:
             devices[name] = {
@@ -742,7 +704,7 @@ def main():
     load_hub_name()
     init_firebase()
     ensure_firebase_hub_branch()
-    load_known_devices_into_memory()
+    load_devices_from_firebase()
     setup_buttons()
 
     udp_socket = create_udp_socket()
