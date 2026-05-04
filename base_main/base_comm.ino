@@ -26,58 +26,54 @@ void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort) {
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, rawData)) return; 
 
-  String action = doc["Action"] | "";
-  String hubName = doc["Hub_Name"] | doc["hub_name"] | ""; // Flexible key check
+  String action = doc["action"] | "";
+  String hubName = doc["hub_Name"] | "";
 
-  // 1. DISCOVERY HANDSHAKE
+  // 1. DISCOVERY LOGIC (Acts as both Pairing and Heartbeat)
   if (action == "discovery") {
-    isDiscovered = true;
-    pairedHubName = hubName;
-    hubIP = senderIP; // Update Hub IP dynamically
-    updateLEDStatus("PAIRED");
-    sendDiscoveryResponse(senderIP, senderPort);
+    if (!isDiscovered) {
+      isDiscovered = true;
+      isShutdown = false; // Wake up from safe mode
+      pairedHubName = hubName;
+      hubIP = senderIP;
+      lastDiscoveryReceived = millis(); // Reset timer
+      
+      Serial.println("SUCCESS: Paired with Hub: " + hubName);
+      updateLEDStatus("PAIRED"); // Green
+      sendDiscoveryResponse(senderIP, senderPort);
+    } 
+        else if (hubName == pairedHubName) {
+      lastDiscoveryReceived = millis(); // Reset watchdog timer
+      }
   }
-
-  // 2. HEARTBEAT RESPONSE
-  else if (action == "Heartbeat_response") {
-    // Hub responded, connection is alive
-    Serial.println("Heartbeat_response received from " + hubName);
-  }
-
-  // 3. COMMAND RECEIVED
-else if (action == "Power") {
+  
+  else if (isDiscovered && !isShutdown && action == "power") {
     String cmdID = doc["Command_ID"] | "0";
-    String targetNode = doc["Node"] | "";
-    String val = doc["Value"] | "Low";
-
-    Serial.println("Command [" + cmdID + "] for " + targetNode + " set to " + val);
-    // Execute hardware action
+    String targetNode = doc["node"] | "";
+    String val = doc["value"] | "low";
+    
     executeCommand(targetNode, val);
-    // Respond back to Hub
     sendCommandResponse(cmdID, senderIP, senderPort);
   }
 }
-
-// --- Outgoing Packet Schemas ---
-
 // DISCOVERY RESPONSE (ESP -> PI)
 void sendDiscoveryResponse(IPAddress ip, int port) {
   StaticJsonDocument<512> doc;
   doc["device_name"] = BASE_NAME;
   doc["ip"] = WiFi.localIP().toString();
-  doc["Action"] = "Discovery_Response";
+  doc["action"] = "discovery_response";
   
   JsonObject nodeL = doc.createNestedObject("Node_L");
-  nodeL["Attached"] = isNodeAttached(0);
-  nodeL["Power"] = isNodeOn(0);
+  nodeL["attached"] = isNodeAttached(0);
+  nodeL["power"] = isNodeOn(0);
   
   JsonObject nodeR = doc.createNestedObject("Node_R");
-  nodeR["Attached"] = isNodeAttached(1);
-  nodeR["Power"] = isNodeOn(1);
+  nodeR["attached"] = isNodeAttached(1);
+  nodeR["power"] = isNodeOn(1);
 
   JsonObject nodeNone = doc.createNestedObject("Node_C");
-  nodeNone["Attached"] = false;
-  nodeNone["Power"] = isNodeOn(2);
+  nodeNone["attached"] = true;
+  nodeNone["power"] = isNodeOn(2);
 
   sendJsonPacket(doc, ip, port);
 }
@@ -87,7 +83,7 @@ void sendHeartbeat() {
   StaticJsonDocument<256> doc;
   doc["device_name"] = BASE_NAME;
   doc["ip"] = WiFi.localIP().toString();
-  doc["Action"] = "Heartbeat";
+  doc["action"] = "heartbeat";
   
   sendJsonPacket(doc, hubIP, 50000);
 }
@@ -98,7 +94,7 @@ void sendCommandResponse(String cmdID, IPAddress ip, int port) {
   doc["Command_ID"] = cmdID;
   doc["base_name"] = BASE_NAME;
   doc["base_ip"] = WiFi.localIP().toString();
-  doc["status"] = "Success";
+  doc["status"] = "success";
   doc["time"] = getFormattedTime();
   
   sendJsonPacket(doc, ip, port);
