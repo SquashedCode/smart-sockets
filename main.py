@@ -374,6 +374,13 @@ def handle_udp_message(data, address):
         print("Received non-JSON packet from", ip)
         return
 
+    #------------------------------------------------------------
+    # FILTER OUT HUB DISCOVERY PACKETS
+    #------------------------------------------------------------
+
+    if message.get("Action") == "discovery":
+        return
+
     if is_discovery_response(message):
         name = (
             message.get("device_name")
