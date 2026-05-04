@@ -12,6 +12,13 @@ extern String pairedHubName;
 extern bool isNodeAttached(int index);
 extern bool isNodeOn(int index);
 
+String getPowerStatus(bool isOn) {
+  return isOn ? "on" : "off";
+}
+String getAttachmentStatus(bool isAttached) {
+  return isAttached ? "attached" : "disconnected";
+}
+
 // --- Time Helper ---
 String getFormattedTime() {
   struct tm timeinfo;
@@ -23,6 +30,9 @@ String getFormattedTime() {
 
 // --- Incoming Packet Handling ---
 void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort) {
+  Serial.println("--- NEW UDP PACKET RECEIVED ---");
+  Serial.print("From IP: "); Serial.println(senderIP.toString());
+  Serial.print("Raw Data: "); Serial.println(rawData);
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, rawData)) return; 
 
@@ -48,54 +58,57 @@ void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort) {
   }
   
   else if (isDiscovered && !isShutdown && action == "power") {
-    String cmdID = doc["Command_ID"] | "0";
     String targetNode = doc["node"] | "";
     String val = doc["value"] | "low";
     
     executeCommand(targetNode, val);
-    sendCommandResponse(cmdID, senderIP, senderPort);
+    sendCommandResponse(senderIP, senderPort);
   }
 }
 // DISCOVERY RESPONSE (ESP -> PI)
 void sendDiscoveryResponse(IPAddress ip, int port) {
   StaticJsonDocument<512> doc;
-  doc["device_name"] = BASE_NAME;
+  doc["base"] = BASE_NAME;
   doc["ip"] = WiFi.localIP().toString();
-  doc["action"] = "discovery_response";
-  
-  JsonObject nodeL = doc.createNestedObject("Node_L");
-  nodeL["attached"] = isNodeAttached(0);
-  nodeL["power"] = isNodeOn(0);
-  
-  JsonObject nodeR = doc.createNestedObject("Node_R");
-  nodeR["attached"] = isNodeAttached(1);
-  nodeR["power"] = isNodeOn(1);
+  doc["action"] = "discovery_response"; // Ensure this key matches your Pi's expected key
 
-  JsonObject nodeNone = doc.createNestedObject("Node_C");
-  nodeNone["attached"] = true;
-  nodeNone["power"] = isNodeOn(2);
+  // Node_L
+  JsonObject node_L = doc.createNestedObject("Node_L");
+  node_L["attached"] = getAttachmentStatus(isNodeAttached(0));
+  node_L["power"] = getPowerStatus(isNodeOn(0));
+  
+  // Node_R
+  JsonObject node_R = doc.createNestedObject("Node_R");
+  node_R["attached"] = getAttachmentStatus(isNodeAttached(1));
+  node_R["power"] = getPowerStatus(isNodeOn(1));
 
-  sendJsonPacket(doc, ip, port);
+  // Node_C
+  JsonObject node_C = doc.createNestedObject("Node_C");
+  node_C["power"] = getPowerStatus(isNodeOn(2));
+
+  // Send the packet
+  sendJsonPacket(doc, ip, port, "Discovery_Response");
 }
 
 // COMMAND RESPONSE (ESP -> PI)
-void sendCommandResponse(String cmdID, IPAddress ip, int port) {
+void sendCommandResponse(IPAddress ip, int port) {
   StaticJsonDocument<256> doc;
-  doc["Command_ID"] = cmdID;
   doc["base_name"] = BASE_NAME;
   doc["base_ip"] = WiFi.localIP().toString();
   doc["status"] = "success";
   doc["time"] = getFormattedTime();
   
-  sendJsonPacket(doc, ip, port);
+  sendJsonPacket(doc, ip, port, "command_response");
 }
 
 // Helper to serialize and send
-void sendJsonPacket(JsonDocument& doc, IPAddress ip, int port) {
+void sendJsonPacket(JsonDocument& doc, IPAddress ip, int port, String label) {
   char buffer[512];
   serializeJson(doc, buffer);
   udp.beginPacket(ip, port);
   udp.write((uint8_t*)buffer, strlen(buffer));
   udp.endPacket();
-  Serial.println("TX: " + String(buffer));
+  Serial.println("Packet Type: " + label);
+  Serial.println("Destination: " + ip.toString() + ":" + String(port));
+  Serial.println("Payload: " + String(buffer));
 }
