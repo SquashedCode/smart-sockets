@@ -292,14 +292,47 @@ def sync_device_to_firebase(device_name, device_data):
 
 
 def build_device_data(device_name, device_ip, message):
-    node_l = message.get("node_l", {})
-    node_r = message.get("node_r", {})
+    device_name = clean_lower_string(device_name, "unknown_esp")
+
+    with devices_lock:
+        existing_raw = devices.get(device_name, {}).get("raw", {})
+
+    node_l = message.get("node_l", existing_raw.get("node_l", {}))
+    node_r = message.get("node_r", existing_raw.get("node_r", {}))
+
+    base_power = bool_to_string(
+        message.get("base_power", existing_raw.get("base_power", "false"))
+    )
+
+    target_node = clean_lower_string(message.get("node", ""))
+    value = clean_lower_string(message.get("value", ""))
+
+    if value in ["high", "low", "true", "false", "on", "off"]:
+        power_value = "true" if string_true(value) else "false"
+
+        if target_node == "base":
+            base_power = power_value
+
+            if node_l:
+                node_l["power"] = power_value
+
+            if node_r:
+                node_r["power"] = power_value
+
+        elif target_node == "node_c":
+            base_power = power_value
+
+        elif target_node == "node_l":
+            node_l["power"] = power_value
+
+        elif target_node == "node_r":
+            node_r["power"] = power_value
 
     return {
-        "name": clean_lower_string(device_name, "unknown_esp"),
+        "name": device_name,
         "ip": clean_string(device_ip, "0.0.0.0"),
         "status_base": "online",
-        "base_power": bool_to_string(message.get("base_power", "false")),
+        "base_power": base_power,
         "node_l": {
             "attached": bool_to_string(node_l.get("attached", "false")),
             "power": bool_to_string(node_l.get("power", "false"))
