@@ -3,12 +3,10 @@
 #include <ArduinoJson.h>
 #include <time.h>
 
-// --- Configuration ---
 const String BASE_NAME = "base_1";
 const int UDP_PORT = 50000;
 IPAddress hubIP;
 
-// --- System State Variables ---
 bool isDiscovered = false;
 bool isShutdown = false;
 bool isUpdating = false;      // Added for firmware update state
@@ -18,7 +16,6 @@ unsigned long lastHeartbeatSent = 0;
 
 WiFiUDP udp;
 
-// --- Extern Declarations (Linking to base_comm & base_commands) ---
 extern void setupPins();
 extern void broadcastDiscovery();
 extern void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort);
@@ -30,10 +27,8 @@ void setup() {
   Serial.begin(115200);
   Serial.println("\n--- Base Station Booting ---");
   
-  // Initialize Relays and LEDs (LED defaults to IDLE/White)
   setupPins(); 
   
-  // WiFi Connection
   WiFi.begin("CrimsonTraveler-2.4", "3CrimsonCrows!"); // [UPDATE YOUR CREDS]
   Serial.print("Connecting to WiFi");
   while (WiFi.status() != WL_CONNECTED) { 
@@ -42,7 +37,6 @@ void setup() {
   }
   Serial.println("\nWiFi Connected! IP: " + WiFi.localIP().toString());
   
-  // Network Initialization
   udp.begin(UDP_PORT);
   configTime(0, 0, "pool.ntp.org");
 
@@ -62,7 +56,6 @@ void loop() {
   }
 
   if (isDiscovered && !isUpdating) {
-    // Heartbeat Protocol: Send every 6 seconds
     if (millis() - lastDiscoveryReceived > 16000) {
       Serial.println("!!SAFE MODE!!");
       isDiscovered = false;
