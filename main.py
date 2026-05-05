@@ -208,6 +208,7 @@ def make_firebase_safe_device_data(device_data):
         "name": clean_lower_string(device_data.get("name", "unknown")),
         "ip": clean_string(device_data.get("ip", "0.0.0.0")),
         "status_base": clean_lower_string(device_data.get("status_base", "online")),
+        "base_power": string_true(device_data.get("base_power", "false")),
         "node_l": {
             "attached": string_true(node_l.get("attached", "false")),
             "power": string_true(node_l.get("power", "false"))
@@ -232,6 +233,7 @@ def firebase_to_runtime_device(device_name, device_data):
             "name": clean_lower_string(device_data.get("name", device_name)),
             "ip": clean_string(device_data.get("ip", "unknown")),
             "status_base": clean_lower_string(device_data.get("status_base", "unknown")),
+            "base_power": bool_to_string(device_data.get("base_power", False)),
             "node_l": {
                 "attached": bool_to_string(node_l.get("attached", False)),
                 "power": bool_to_string(node_l.get("power", False))
@@ -297,6 +299,7 @@ def build_device_data(device_name, device_ip, message):
         "name": clean_lower_string(device_name, "unknown_esp"),
         "ip": clean_string(device_ip, "0.0.0.0"),
         "status_base": "online",
+        "base_power": bool_to_string(message.get("base_power", "false")),
         "node_l": {
             "attached": bool_to_string(node_l.get("attached", "false")),
             "power": bool_to_string(node_l.get("power", "false"))
@@ -742,19 +745,72 @@ def get_current_power_value(device, target):
     raw = device.get("raw", {})
 
     if target == "base":
-        return string_true(raw.get("power", raw.get("status_base", "false")))
+        return string_true(raw.get("base_power", "false"))
 
     node_data = raw.get(target, {})
     return string_true(node_data.get("power", "false"))
+
+def locally_toggle_device_state(device, target, new_value):
+    base_name = clean_lower_string(device.get("name", ""))
+    power_value = "true" if new_value == "high" else "false"
+    updated_raw = None
+
+    with devices_lock:
+        if base_name not in devices:
+            return
+
+        raw = devices[base_name].get("raw", {})
+
+        if target == "base":
+            raw["base_power"] = power_value
+        else:
+            if target not in raw:
+                raw[target] = {}
+
+            raw[target]["power"] = power_value
+
+        devices[base_name]["raw"] = raw
+        updated_raw = raw
+
+    global needs_display_update
+    needs_display_update = True
+
+    if updated_raw:
+        sync_device_to_firebase(base_name, updated_raw)
+
+def push_menu_command_to_firebase(device, target, new_value):
+    if firebase_admin is None or not firebase_admin._apps:
+        return f"menu_{int(time.time())}"
+
+    command_data = {
+        "action": "power",
+        "base": clean_lower_string(device.get("name", "")),
+        "hub": hub_name,
+        "node": target,
+        "status": "processing",
+        "time": str(time.time()),
+        "value": new_value
+    }
+
+    try:
+        command_ref = db.reference(COMMANDS_PATH).push(command_data)
+        return command_ref.key
+    except Exception as error:
+        print("could not push menu command to firebase:", error)
+        return f"menu_{int(time.time())}"
 
 
 def send_menu_power_command(device, target):
     current_power = get_current_power_value(device, target)
     new_value = "low" if current_power else "high"
 
+    command_id = push_menu_command_to_firebase(device, target, new_value)
+
+    locally_toggle_device_state(device, target, new_value)
+
     packet = {
         "action": "power",
-        "command_id": f"menu_{int(time.time())}",
+        "command_id": command_id,
         "hub_name": hub_name,
         "base": clean_lower_string(device.get("name", "")),
         "node": target,
@@ -765,12 +821,12 @@ def send_menu_power_command(device, target):
 
     ip = clean_string(device.get("ip", ""))
 
-    if ip and ip != "unknown":
-        print(f"menu command to {device['name']} at {ip}: {target} -> {new_value}")
+    if ip and ip not in ["unknown", "0.0.0.0", ""]:
         send_udp_message(packet, ip=ip)
     else:
-        print(f"menu command broadcast for {device['name']}: {target} -> {new_value}")
         send_udp_message(packet, ip=BROADCAST_IP)
+
+    print(f"menu command sent: {target} -> {new_value}, command_id={command_id}")
 
 def check_buttons():
     global selected_index
@@ -809,15 +865,12 @@ def check_buttons():
 
     elif button_pressed(BUTTON_LEFT):
         if menu_layer == "devices":
-            with devices_lock:
-                device_count = len(devices)
-
-            if device_count > 0:
-                submenu_index = (submenu_index - 1) % device_count
-                device_control_index = 0
+            menu_layer = "main"
+            submenu_index = 0
+            device_control_index = 0
 
         elif menu_layer != "main":
-            submenu_index = max(0, submenu_index - 1)
+            menu_layer = "main"
 
         wait_for_button_release(BUTTON_LEFT)
         needs_display_update = True
@@ -830,9 +883,6 @@ def check_buttons():
             if device_count > 0:
                 submenu_index = (submenu_index + 1) % device_count
                 device_control_index = 0
-
-        elif menu_layer != "main":
-            submenu_index += 1
 
         wait_for_button_release(BUTTON_RIGHT)
         needs_display_update = True
@@ -955,7 +1005,7 @@ def draw_devices_menu(draw):
 
         if option == "base":
             label = "Base"
-            power = "?"
+            power = "ON" if get_current_power_value(device, "base") else "OFF"
         else:
             node_data = raw.get(option, {})
             label = option
@@ -970,7 +1020,7 @@ def draw_devices_menu(draw):
 
         y += 36
 
-    draw.text((25, 258), "L/R: device  U/D: part  SEL: toggle", font=small_font, fill=0)
+    draw.text((25, 258), "R: device  L: back  U/D: part  SEL: toggle", font=small_font, fill=0)
 
 def draw_settings_menu(draw):
     title_font = get_font(FONT_HEADER)
