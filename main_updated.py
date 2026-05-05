@@ -63,6 +63,10 @@ COMMAND_POLL_INTERVAL = 1.0
 DISCOVERY_INTERVAL = 5
 DEVICE_TIMEOUT = 20
 
+SCREENSAVER_TIMEOUT = 30
+screensaver_active = False
+last_activity_time = time.time()
+
 DISPLAY_WIDTH = 400
 DISPLAY_HEIGHT = 300
 
@@ -959,6 +963,23 @@ def check_buttons():
     global menu_layer
     global needs_display_update
     global device_control_index
+    global screensaver_active
+    global last_activity_time
+
+    any_pressed = any(button_pressed(pin) for pin in BUTTON_PINS)
+
+    if any_pressed:
+        last_activity_time = time.time()
+
+        if screensaver_active:
+            screensaver_active = False
+            needs_display_update = True
+
+            for pin in BUTTON_PINS:
+                if button_pressed(pin):
+                    wait_for_button_release(pin)
+
+            return
 
     if button_pressed(BUTTON_UP):
         if menu_layer == "main":
@@ -1049,7 +1070,6 @@ def check_buttons():
 
         wait_for_button_release(BUTTON_SELECT)
         needs_display_update = True
-
 
 #------------------------------------------------------------
 # FONT FUNCTIONS
@@ -1240,6 +1260,21 @@ def render_display_image():
 
     return image
 
+def show_screensaver(epd):
+    image_path = "img/screensaver.png"
+
+    if not os.path.exists(image_path):
+        return
+
+    image = Image.open(image_path).convert("1")
+    image = image.resize((DISPLAY_WIDTH, DISPLAY_HEIGHT))
+
+    if epd is None:
+        return
+
+    epd.display(epd.getbuffer(image))
+
+
 
 #------------------------------------------------------------
 # DISPLAY SETUP AND UPDATE
@@ -1279,6 +1314,8 @@ def main():
     global udp_socket
     global needs_display_update
     global running
+    global screensaver_active
+    global last_activity_time
 
     load_hub_name()
     init_firebase()
@@ -1300,11 +1337,17 @@ def main():
 
     send_discovery()
 
+    last_activity_time = time.time()
+
     try:
         while True:
             check_buttons()
 
-            if needs_display_update:
+            if not screensaver_active and time.time() - last_activity_time >= SCREENSAVER_TIMEOUT:
+                screensaver_active = True
+                show_screensaver(epd)
+
+            if needs_display_update and not screensaver_active:
                 update_display(epd)
                 needs_display_update = False
 
