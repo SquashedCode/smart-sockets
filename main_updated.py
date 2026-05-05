@@ -1193,17 +1193,35 @@ def draw_network_menu(draw):
 
 
 def draw_about_menu(draw):
-    title_font = get_font(FONT_HEADER)
-    item_font = get_font(FONT_ITEM)
-    small_font = get_font(FONT_SMALL)
-
+    # Fonts
+    title_font = get_font(FONT_HEADER)   # header (black bar)
+    large_font = get_font(34)            # largest text
+    medium_font = get_font(26)           # medium text
+    small_font = get_font(FONT_SMALL)    # small text
+    # Header (black bar like other menus)
     draw_header(draw, "About", title_font)
-
-    draw.text((25, 70), "Senior Design Hub", font=item_font, fill=0)
-    draw.text((25, 115), "Team Socket", font=item_font, fill=0)
-    draw.text((25, 160), "Pi + ESP32", font=item_font, fill=0)
-    draw.text((25, 230), "SELECT: back", font=small_font, fill=0)
-
+    # Y positioning
+    y = 65
+    # Main Title
+    draw.text((25, y), "Smart Socket Hub", font=large_font, fill=0)
+    y += 50
+    # Team Name
+    draw.text((25, y), "Team Socket", font=medium_font, fill=0)
+    y += 40
+    # Spacing before names
+    y += 10
+    # Team Members (small font)
+    members = [
+        "Dylan Throckmorton",
+        "Anurag Chemakurthi",
+        "Abhijeet Chahande",
+        "Harrison Gallo"
+    ]
+    for member in members:
+        draw.text((25, y), member, font=small_font, fill=0)
+        y += 28
+    # Bottom instruction
+    draw.text((25, 265), "SELECT: back", font=small_font, fill=0)
 
 def render_display_image():
     image = Image.new("1", (DISPLAY_WIDTH, DISPLAY_HEIGHT), 255)
