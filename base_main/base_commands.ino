@@ -4,27 +4,31 @@
 // Node_L: Out=0, In=1
 // Node_R: Out=6, In=5
 // NONE (Main): Out=2, In=None
-const int OUT_PINS[3] = {1, 6, 2}; 
-const int IN_PINS[3]  = {0, 7, -1}; // -1 means no sensor
+const int OUT_PINS[3] = {3, 7, 2}; 
+const int IN_PINS[3]  = {10, 5, -1}; // -1 means no sensor
 
 const int LED_PIN = 4;
 const int NUM_PIXELS = 2;
 Adafruit_NeoPixel pixels(NUM_PIXELS, LED_PIN, NEO_GRB + NEO_KHZ800);
+bool lastAttachedState[3] = {false, false, false};
+bool lastPowerState[3] = {false, false, false};
+
 
 void setupPins() {
   pixels.begin();
   pixels.setBrightness(50);
   updateLEDStatus("IDLE");
   
-  for(int i = 0; i < 3; i++) {
-    digitalWrite(OUT_PINS[i], LOW); 
+  for(int i = 0; i < 3; i++) { 
     pinMode(OUT_PINS[i], OUTPUT);
-    
+    digitalWrite(OUT_PINS[i], HIGH);
+
     if (IN_PINS[i] != -1) {
-      pinMode(IN_PINS[i], INPUT_PULLUP); // Assumes sensor pulls to GND
+      pinMode(IN_PINS[i], INPUT_PULLDOWN); // Assumes sensor pulls to GND
     }
   }
 }
+
 extern bool isDiscovered;
 void updateLEDStatus(String status) {
   uint32_t color;
@@ -45,29 +49,61 @@ void executeCommand(String target, String value) {
     return;
   }
 
-  int signal = (value.equalsIgnoreCase("high")) ? LOW : HIGH;
+  // Active-HIGH logic:
+  // "high" command turns output HIGH
+  // "low" command turns output LOW
+  int signal = (value.equalsIgnoreCase("high")) ? HIGH : LOW;
 
   if (target == "base") {
-    for(int i = 0; i < 3; i++) digitalWrite(OUT_PINS[i], signal);
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(OUT_PINS[i], signal);
+    }
   } 
   else {
     int pinIdx = -1;
+
     if (target == "node_l") pinIdx = 0;
     else if (target == "node_r") pinIdx = 1;
     else if (target == "node_c") pinIdx = 2;
 
-    if (pinIdx != -1) digitalWrite(OUT_PINS[pinIdx], signal);
+    if (pinIdx != -1) {
+      digitalWrite(OUT_PINS[pinIdx], signal);
+    }
   }
 }
 
 bool isNodeAttached(int index) {
-  return (IN_PINS[index] != -1 && digitalRead(IN_PINS[index]) == LOW);
+  return (IN_PINS[index] != -1 && digitalRead(IN_PINS[index]) == HIGH);
 }
 
 bool isNodeOn(int index) {
-  return (digitalRead(OUT_PINS[index]) == LOW);
+  return digitalRead(OUT_PINS[index]) == HIGH;
 }
 
 void triggerTotalShutdown() {
-  for(int i = 0; i < 3; i++) digitalWrite(OUT_PINS[i], LOW);
+  for (int i = 0; i < 3; i++) {
+    digitalWrite(OUT_PINS[i], LOW);
+  }
+}
+
+void checkForStatusChange() {
+  if (!isDiscovered) return;
+
+  bool changed = false;
+
+  for (int i = 0; i < 3; i++) {
+    bool attachedNow = isNodeAttached(i);
+    bool powerNow = isNodeOn(i);
+
+    if (attachedNow != lastAttachedState[i] || powerNow != lastPowerState[i]) {
+      changed = true;
+      lastAttachedState[i] = attachedNow;
+      lastPowerState[i] = powerNow;
+    }
+  }
+
+  if (changed) {
+    Serial.println("[STATUS] Change detected, sending update_status");
+    sendUpdateStatus(hubIP, UDP_PORT);
+  }
 }
