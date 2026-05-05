@@ -1336,8 +1336,11 @@ def main():
     print("local IP:", get_local_ip())
 
     send_discovery()
-
     last_activity_time = time.time()
+
+    screensaver_active = True
+    needs_display_update = False
+    show_screensaver(epd)
 
     try:
         while True:
@@ -1345,6 +1348,7 @@ def main():
 
             if not screensaver_active and time.time() - last_activity_time >= SCREENSAVER_TIMEOUT:
                 screensaver_active = True
+                needs_display_update = False
                 show_screensaver(epd)
 
             if needs_display_update and not screensaver_active:
