@@ -1008,12 +1008,8 @@ def draw_devices_menu(draw):
             power = "ON" if get_current_power_value(device, "base") else "OFF"
         else:
             node_data = raw.get(option, {})
-            if option == "node_l":
-                label = "Left Node"
-            elif option == "node_r":
-                label = "Right Node"
+            label = option
             power = "ON" if string_true(node_data.get("power", "false")) else "OFF"
-
         draw.text(
             (25, y),
             f"{prefix}{label}: {power}",
