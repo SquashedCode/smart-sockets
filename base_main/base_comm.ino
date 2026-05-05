@@ -159,3 +159,21 @@ void sendJsonPacket(JsonDocument& doc, IPAddress ip, int port, String label) {
   udp.endPacket();
   Serial.println("[TX] Sent Encrypted (" + label + ")");
 }
+
+void sendUpdateStatus(IPAddress ip, int port) {
+  StaticJsonDocument<512> doc;
+
+  doc["action"] = "update_status";
+  doc["base"] = BASE_NAME;
+  doc["base_power"] = isNodeOn(2);
+
+  JsonObject node_l = doc.createNestedObject("node_l");
+  node_l["attached"] = isNodeAttached(0);
+  node_l["power"] = isNodeOn(0);
+
+  JsonObject node_r = doc.createNestedObject("node_r");
+  node_r["attached"] = isNodeAttached(1);
+  node_r["power"] = isNodeOn(1);
+
+  sendJsonPacket(doc, ip, port, "update_status");
+}
