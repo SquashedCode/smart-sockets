@@ -1338,9 +1338,10 @@ def main():
     send_discovery()
     last_activity_time = time.time()
 
+    # Boot directly to screensaver
+    show_screensaver(epd)
     screensaver_active = True
     needs_display_update = False
-    show_screensaver(epd)
 
     try:
         while True:
