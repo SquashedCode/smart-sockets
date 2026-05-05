@@ -1072,7 +1072,7 @@ def draw_about_menu(draw):
     draw_header(draw, "About", title_font)
 
     draw.text((25, 70), "Senior Design Hub", font=item_font, fill=0)
-    draw.text((25, 115), "UDP Discovery", font=item_font, fill=0)
+    draw.text((25, 115), "Team Socket", font=item_font, fill=0)
     draw.text((25, 160), "Pi + ESP32", font=item_font, fill=0)
     draw.text((25, 230), "SELECT: back", font=small_font, fill=0)
 
