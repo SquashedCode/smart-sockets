@@ -1,0 +1,102 @@
+def check_buttons():
+    global selected_index
+    global submenu_index
+    global menu_layer
+    global needs_display_update
+    global device_control_index
+
+    if button_pressed(BUTTON_UP):
+        if menu_layer == "main":
+            selected_index = (selected_index - 1) % len(main_menu)
+
+        elif menu_layer == "devices":
+            device = get_selected_device()
+
+            if device:
+                options = get_device_control_options(device)
+                device_control_index = (device_control_index - 1) % len(options)
+
+        wait_for_button_release(BUTTON_UP)
+        needs_display_update = True
+
+    elif button_pressed(BUTTON_DOWN):
+        if menu_layer == "main":
+            selected_index = (selected_index + 1) % len(main_menu)
+
+        elif menu_layer == "devices":
+            device = get_selected_device()
+
+            if device:
+                options = get_device_control_options(device)
+                device_control_index = (device_control_index + 1) % len(options)
+
+        wait_for_button_release(BUTTON_DOWN)
+        needs_display_update = True
+
+    elif button_pressed(BUTTON_LEFT):
+        if menu_layer == "devices":
+            with devices_lock:
+                device_count = len(devices)
+
+            if device_count > 0:
+                submenu_index = (submenu_index - 1) % device_count
+                device_control_index = 0
+
+        elif menu_layer != "main":
+            submenu_index = max(0, submenu_index - 1)
+
+        wait_for_button_release(BUTTON_LEFT)
+        needs_display_update = True
+
+    elif button_pressed(BUTTON_RIGHT):
+        if menu_layer == "devices":
+            with devices_lock:
+                device_count = len(devices)
+
+            if device_count > 0:
+                submenu_index = (submenu_index + 1) % device_count
+                device_control_index = 0
+
+        elif menu_layer != "main":
+            submenu_index += 1
+
+        wait_for_button_release(BUTTON_RIGHT)
+        needs_display_update = True
+
+    elif button_pressed(BUTTON_SELECT):
+        if menu_layer == "main":
+            selected_option = main_menu[selected_index]
+
+            if selected_option == "Discover Devices":
+                send_discovery()
+
+            elif selected_option == "Devices":
+                menu_layer = "devices"
+                submenu_index = 0
+                device_control_index = 0
+
+            elif selected_option == "Hub Settings":
+                menu_layer = "settings"
+                submenu_index = 0
+
+            elif selected_option == "Network Status":
+                menu_layer = "network"
+                submenu_index = 0
+
+            elif selected_option == "About":
+                menu_layer = "about"
+                submenu_index = 0
+
+        elif menu_layer == "devices":
+            device = get_selected_device()
+
+            if device:
+                options = get_device_control_options(device)
+                target = options[device_control_index % len(options)]
+                send_menu_power_command(device, target)
+
+        else:
+            menu_layer = "main"
+
+        wait_for_button_release(BUTTON_SELECT)
+        needs_display_update = True
