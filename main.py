@@ -153,7 +153,7 @@ def debug_print_packet(data, address):
 
     action = clean_lower_string(message.get("action", ""))
 
-    if action not in ["discovery_response", "command_response"]:
+    if action not in ["discovery_response", "_response"]:
         return
 
     print("\n================ UDP PACKET ================")
@@ -342,7 +342,7 @@ def load_devices_from_firebase():
 
 
 #------------------------------------------------------------
-# FIREBASE COMMAND HANDLING
+# FIREBASE  HANDLING
 #------------------------------------------------------------
 
 def get_oldest_pending_command():
@@ -719,7 +719,7 @@ def get_device_control_options(device):
     node_l = raw.get("node_l", {})
     node_r = raw.get("node_r", {})
 
-    options = ["base"]
+    options = ["base", "node_c"]
 
     if string_true(node_l.get("attached", "false")):
         options.append("node_l")
@@ -744,13 +744,22 @@ def get_selected_device():
 def get_current_power_value(device, target):
     raw = device.get("raw", {})
 
-    if target == "base":
+    if target == "node_c":
         return string_true(raw.get("base_power", "false"))
+
+    if target == "base":
+        base_power = string_true(raw.get("base_power", "false"))
+        node_l_power = string_true(raw.get("node_l", {}).get("power", "false"))
+        node_r_power = string_true(raw.get("node_r", {}).get("power", "false"))
+
+        return base_power or node_l_power or node_r_power
 
     node_data = raw.get(target, {})
     return string_true(node_data.get("power", "false"))
 
 def locally_toggle_device_state(device, target, new_value):
+    global needs_display_update
+
     base_name = clean_lower_string(device.get("name", ""))
     power_value = "true" if new_value == "high" else "false"
     updated_raw = None
@@ -761,8 +770,18 @@ def locally_toggle_device_state(device, target, new_value):
 
         raw = devices[base_name].get("raw", {})
 
-        if target == "base":
+        if target == "node_c":
             raw["base_power"] = power_value
+
+        elif target == "base":
+            raw["base_power"] = power_value
+
+            if "node_l" in raw:
+                raw["node_l"]["power"] = power_value
+
+            if "node_r" in raw:
+                raw["node_r"]["power"] = power_value
+
         else:
             if target not in raw:
                 raw[target] = {}
@@ -772,7 +791,6 @@ def locally_toggle_device_state(device, target, new_value):
         devices[base_name]["raw"] = raw
         updated_raw = raw
 
-    global needs_display_update
     needs_display_update = True
 
     if updated_raw:
@@ -1004,19 +1022,23 @@ def draw_devices_menu(draw):
         prefix = "> " if option == selected_target else "  "
 
         if option == "base":
-            label = "Base"
+            label = "All"
             power = "ON" if get_current_power_value(device, "base") else "OFF"
+
+        elif option == "node_c":
+            label = "Base"
+            power = "ON" if get_current_power_value(device, "node_c") else "OFF"
 
         elif option == "node_l":
             node_data = raw.get(option, {})
             label = "Left Node"
-            power = "ON" if string_true(node_data.get("power", "false")) else "OFF"
+            power = "ON" if string_true(node_data.get("power", "false")) else "OFF
 
         elif option == "node_r":
             node_data = raw.get(option, {})
             label = "Right Node"
             power = "ON" if string_true(node_data.get("power", "false")) else "OFF"
-
+        
         draw.text(
             (25, y),
             f"{prefix}{label}: {power}",
