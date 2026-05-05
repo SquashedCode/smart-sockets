@@ -47,7 +47,7 @@ void executeCommand(String target, String value) {
 
   int signal = (value.equalsIgnoreCase("high")) ? LOW : HIGH;
 
-  if (target == "node_a") {
+  if (target == "base") {
     for(int i = 0; i < 3; i++) digitalWrite(OUT_PINS[i], signal);
   } 
   else {
@@ -60,7 +60,6 @@ void executeCommand(String target, String value) {
   }
 }
 
-// Helper methods for Discovery Response
 bool isNodeAttached(int index) {
   return (IN_PINS[index] != -1 && digitalRead(IN_PINS[index]) == LOW);
 }
