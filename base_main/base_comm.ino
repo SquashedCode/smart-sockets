@@ -5,6 +5,7 @@
 extern WiFiUDP udp;
 extern void executeCommand(String node, String value);
 extern void updateLEDStatus(String status);
+extern void sendCommandResponse(String cmdID, String targetNode, String val, IPAddress ip, int port);
 extern const String BASE_NAME;
 extern IPAddress hubIP;
 extern bool isDiscovered;
@@ -63,7 +64,7 @@ void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort) {
     String val = doc["value"] | "low";
     
     executeCommand(targetNode, val);
-    sendCommandResponse(cmdID, senderIP, senderPort);
+    sendCommandResponse(cmdID, targetNode, val, senderIP, senderPort);
   }
 }
 // DISCOVERY RESPONSE (ESP -> PI)
@@ -72,7 +73,7 @@ void sendDiscoveryResponse(IPAddress ip, int port) {
   doc["base"] = BASE_NAME;
   doc["ip"] = WiFi.localIP().toString();
   doc["action"] = "discovery_response"; // Ensure this key matches your Pi's expected key
-
+  doc["base_power"] = getPowerStatus(isNodeOn(2));
   // Node_L
   JsonObject node_l = doc.createNestedObject("Node_L");
   node_l["attached"] = getAttachmentStatus(isNodeAttached(0));
@@ -83,23 +84,18 @@ void sendDiscoveryResponse(IPAddress ip, int port) {
   node_r["attached"] = getAttachmentStatus(isNodeAttached(1));
   node_r["power"] = getPowerStatus(isNodeOn(1));
 
-  // Node_C
-  JsonObject node_c = doc.createNestedObject("Node_C");
-  node_c["power"] = getPowerStatus(isNodeOn(2));
-
-  // Send the packet
   sendJsonPacket(doc, ip, port, "discovery_response");
 }
 
 // COMMAND RESPONSE (ESP -> PI)
-void sendCommandResponse(String cmdID, IPAddress ip, int port) {
+void sendCommandResponse(String cmdID, String targetNode, String val, IPAddress ip, int port) {
   StaticJsonDocument<512> doc;
-  // Header Info
   doc["action"] = "command_response";
   doc["command_id"] = cmdID;
   doc["base"] = BASE_NAME;
-  doc["status"] = "successful";
-  
+  doc["node"] = targetNode;
+  doc["value"] = val;
+  doc["status"] = "success"; 
   sendJsonPacket(doc, ip, port, "command_response");
 }
 
