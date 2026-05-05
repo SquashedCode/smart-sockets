@@ -18,7 +18,7 @@ WiFiUDP udp;
 
 extern void setupPins();
 extern void broadcastDiscovery();
-extern void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort);
+extern void processIncomingUDP(char* rawData, int len, IPAddress senderIP, int senderPort);
 extern void sendHeartbeat();
 extern void triggerTotalShutdown();
 extern void updateLEDStatus(String status);
@@ -49,10 +49,10 @@ void loop() {
   }
   int packetSize = udp.parsePacket();
   if (packetSize > 0) {
-    char incoming[512];
+    uint8_t incoming[512]; // Use uint8_t for binary data
     int len = udp.read(incoming, 511);
-    incoming[len] = '\0';
-    processIncomingUDP(incoming, udp.remoteIP(), udp.remotePort());
+    // You MUST pass 'len' now, otherwise decryption won't know how much to process
+    processIncomingUDP(incoming, len, udp.remoteIP(), udp.remotePort());
   }
 
   if (isDiscovered && !isUpdating) {
