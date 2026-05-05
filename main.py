@@ -1261,7 +1261,7 @@ def render_display_image():
     return image
 
 def show_screensaver(epd):
-    image_path = "img/screensaver.png"
+    image_path = "img/screensaver.bmp"
 
     if not os.path.exists(image_path):
         return
