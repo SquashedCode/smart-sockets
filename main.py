@@ -987,7 +987,7 @@ def draw_main_menu(draw):
 
 def draw_devices_menu(draw):
     title_font = get_font(FONT_HEADER)
-    item_font = get_font(FONT_ITEM)
+    item_font = get_font(20)
     small_font = get_font(FONT_SMALL)
 
     draw_header(draw, "Devices", title_font)
@@ -1012,11 +1012,10 @@ def draw_devices_menu(draw):
     selected_target = options[device_control_index % len(options)]
 
     draw.text((25, 56), f"Device {index + 1}/{len(device_list)}", font=small_font, fill=0)
-    draw.text((25, 80), f"Name: {device['name']}", font=small_font, fill=0)
-    draw.text((25, 104), f"IP: {device['ip']}", font=small_font, fill=0)
-    draw.text((25, 128), f"Status: {device['status']}", font=small_font, fill=0)
+    draw.text((25, 76), f"Name: {device['name']}", font=small_font, fill=0)
+    draw.text((25, 96), f"Status: {device['status']}", font=small_font, fill=0)
 
-    y = 160
+    y = 120
 
     for option in options:
         prefix = "> " if option == selected_target else "  "
@@ -1046,7 +1045,7 @@ def draw_devices_menu(draw):
             fill=0
         )
 
-        y += 36
+        y += 28
 
     draw.text((25, 258), "R: device  L: back  U/D: part  SEL: toggle", font=small_font, fill=0)
 
