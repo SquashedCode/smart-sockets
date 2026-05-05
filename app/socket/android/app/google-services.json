@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "435112606639",
+    "firebase_url": "https://team-socket-default-rtdb.firebaseio.com",
+    "project_id": "team-socket",
+    "storage_bucket": "team-socket.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:435112606639:android:665186e6737bc4de7c8d5a",
+        "android_client_info": {
+          "package_name": "com.example.socket"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "435112606639-b1nd74tdn1qphpk76qvd21slhk7oie1r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC7Go8R7K9clZuqtFaWGwKlGVLTYTmwroQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "435112606639-b1nd74tdn1qphpk76qvd21slhk7oie1r.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
