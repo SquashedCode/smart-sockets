@@ -18,10 +18,13 @@ WiFiUDP udp;
 
 extern void setupPins();
 extern void broadcastDiscovery();
-extern void processIncomingUDP(char* rawData, int len, IPAddress senderIP, int senderPort);
+extern void processIncomingUDP(uint8_t* rawData, int len, IPAddress senderIP, int senderPort);
 extern void sendHeartbeat();
 extern void triggerTotalShutdown();
 extern void updateLEDStatus(String status);
+extern void sendUpdateStatus(IPAddress ip, int port);
+extern bool isNodeAttached(int index);
+extern bool isNodeOn(int index);
 
 void setup() {
   Serial.begin(115200);
@@ -56,12 +59,16 @@ void loop() {
   }
 
   if (isDiscovered && !isUpdating) {
-    if (millis() - lastDiscoveryReceived > 16000) {
-      Serial.println("!!SAFE MODE!!");
-      isDiscovered = false;
-      isShutdown = true;
-      triggerTotalShutdown();
-      updateLEDStatus("SAFE_MODE");
+    checkForStatusChange();
+
+    if (isDiscovered && !isUpdating) {
+      if (millis() - lastDiscoveryReceived > 16000) {
+        Serial.println("!!SAFE MODE!!");
+        isDiscovered = false;
+        isShutdown = true;
+        triggerTotalShutdown();
+        updateLEDStatus("SAFE_MODE");
+      }
     }
   }
 }
