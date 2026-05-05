@@ -107,7 +107,7 @@ main_menu = [
 
 needs_display_update = True
 running = True
-udp_socket = None
+_socket = None
 
 
 #------------------------------------------------------------
@@ -140,7 +140,7 @@ def bool_to_string(value):
 
 
 #------------------------------------------------------------
-# DEBUG: PRINT UDP PACKET
+# DEBUG: PRINT  PACKET
 #------------------------------------------------------------
 
 def debug_print_packet(data, address):
@@ -156,7 +156,7 @@ def debug_print_packet(data, address):
     if action not in ["discovery_response", "_response"]:
         return
 
-    print("\n================ UDP PACKET ================")
+    print("\n================  PACKET ================")
     print(f"FROM: {ip}")
 
     try:
@@ -427,7 +427,7 @@ def update_command_status(command_id, status):
         print("could not update command status:", error)
 
 
-def make_udp_command_packet(command_id, command_data):
+def make__command_packet(command_id, command_data):
     return {
         "action": clean_lower_string(command_data.get("action", "")),
         "command_id": command_id,
@@ -607,7 +607,7 @@ def handle_udp_message(data, address):
 
     print("UDP MESSAGE RECIEVED:")
     print(json.dumps(message, indent=2))
-    print("ACTION:",action)
+    print("ACTION:", action)
 
     if action == "discovery":
         return
@@ -668,6 +668,10 @@ def handle_udp_message(data, address):
             else:
                 update_command_status(command_id, "error")
 
+    elif action == "update_status":
+        print("[UDP] update_status received")
+        handle_update_status(message)
+
     elif message.get("type", "") == "rename_hub":
         new_name = message.get("new_name")
 
@@ -679,6 +683,32 @@ def handle_udp_message(data, address):
     else:
         return
 
+def handle_update_status(packet):
+    base_name = packet.get("base")
+    if not base_name:
+        print("[UPDATE_STATUS] Missing base name")
+        return
+
+    base_ref = db.reference(f"DeviceList/{USER_NAME}/{hub_name}/{base_name}")
+
+    update_data = {
+        "last_seen": str(time.time()),
+        "base_power": str(packet.get("base_power", False)).lower(),
+
+        "node_L": {
+            "attached": str(packet.get("node_l", {}).get("attached", False)).lower(),
+            "power": str(packet.get("node_l", {}).get("power", False)).lower()
+        },
+
+        "node_R": {
+            "attached": str(packet.get("node_r", {}).get("attached", False)).lower(),
+            "power": str(packet.get("node_r", {}).get("power", False)).lower()
+        }
+    }
+
+    base_ref.update(update_data)
+
+    print(f"[UPDATE_STATUS] Updated Firebase for {base_name}")
 
 def udp_listener_thread():
     global running
