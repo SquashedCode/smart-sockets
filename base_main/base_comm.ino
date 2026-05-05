@@ -1,7 +1,6 @@
 #include <ArduinoJson.h>
 #include <time.h>
 
-// --- Externs ---
 extern WiFiUDP udp;
 extern void executeCommand(String node, String value);
 extern void updateLEDStatus(String status);
@@ -13,51 +12,31 @@ extern String pairedHubName;
 extern bool isNodeAttached(int index);
 extern bool isNodeOn(int index);
 
-String getPowerStatus(bool isOn) {
-  return isOn ? "on" : "off";
-}
-String getAttachmentStatus(bool isAttached) {
-  return isAttached ? "attached" : "disconnected";
-}
-
-// --- Time Helper ---
-String getFormattedTime() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) return "0-0-0-0:0:0";
-  char buffer[32];
-  strftime(buffer, sizeof(buffer), "%m-%d-%y-%H:%M:%S", &timeinfo);
-  return String(buffer);
-}
-
-// --- Incoming Packet Handling ---
 void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort) {
-  Serial.println("--- NEW UDP PACKET RECEIVED ---");
-  Serial.print("From IP: "); Serial.println(senderIP.toString());
-  Serial.print("Raw Data: "); Serial.println(rawData);
+  Serial.println("[RX] PACKET RECEIVED");
+  Serial.println("[RX] From: " + senderIP.toString() + ":" + String(senderPort));
+  Serial.println("[RX] Content: " + String(rawData));
   StaticJsonDocument<512> doc;
   if (deserializeJson(doc, rawData)) return; 
 
   String action = doc["action"] | "";
   String hubName = doc["hub_name"] | "";
 
-  // 1. DISCOVERY LOGIC (Acts as both Pairing and Heartbeat)
   if (action == "discovery") {
     if (!isDiscovered) {
       isDiscovered = true;
-      isShutdown = false; // Wake up from safe mode
+      isShutdown = false;
       pairedHubName = hubName;
       hubIP = senderIP;
-      lastDiscoveryReceived = millis(); // Reset timer
+      lastDiscoveryReceived = millis();
       
-      Serial.println("SUCCESS: Paired with Hub: " + hubName);
-      updateLEDStatus("PAIRED"); // Green
+      updateLEDStatus("PAIRED");
       sendDiscoveryResponse(senderIP, senderPort);
     } 
-        else if (hubName == pairedHubName) {
-      lastDiscoveryReceived = millis(); // Reset watchdog timer
-      }
+    else if (hubName == pairedHubName) {
+      lastDiscoveryReceived = millis();
+    }
   }
-  
   else if (isDiscovered && !isShutdown && action == "power") {
     String cmdID = doc["command_id"] | "0";
     String targetNode = doc["node"] | "";
@@ -67,27 +46,28 @@ void processIncomingUDP(char* rawData, IPAddress senderIP, int senderPort) {
     sendCommandResponse(cmdID, targetNode, val, senderIP, senderPort);
   }
 }
-// DISCOVERY RESPONSE (ESP -> PI)
+
 void sendDiscoveryResponse(IPAddress ip, int port) {
   StaticJsonDocument<512> doc;
   doc["base"] = BASE_NAME;
   doc["ip"] = WiFi.localIP().toString();
-  doc["action"] = "discovery_response"; // Ensure this key matches your Pi's expected key
-  doc["base_power"] = getPowerStatus(isNodeOn(2));
+  doc["action"] = "discovery_response";
+  
+  doc["base_power"] = isNodeOn(2);
   // Node_L
-  JsonObject node_l = doc.createNestedObject("Node_L");
-  node_l["attached"] = getAttachmentStatus(isNodeAttached(0));
-  node_l["power"] = getPowerStatus(isNodeOn(0));
+  JsonObject node_l = doc.createNestedObject("node_l");
+  node_l["attached"] = isNodeAttached(0); // Boolean
+  node_l["power"] = isNodeOn(0);         // Boolean
   
   // Node_R
-  JsonObject node_r = doc.createNestedObject("Node_R");
-  node_r["attached"] = getAttachmentStatus(isNodeAttached(1));
-  node_r["power"] = getPowerStatus(isNodeOn(1));
+  JsonObject node_r = doc.createNestedObject("node_r");
+  node_r["attached"] = isNodeAttached(1); // Boolean
+  node_r["power"] = isNodeOn(1);         // Boolean
 
   sendJsonPacket(doc, ip, port, "discovery_response");
 }
 
-// COMMAND RESPONSE (ESP -> PI)
+// COMMAND RESPONSE
 void sendCommandResponse(String cmdID, String targetNode, String val, IPAddress ip, int port) {
   StaticJsonDocument<512> doc;
   doc["action"] = "command_response";
@@ -96,17 +76,18 @@ void sendCommandResponse(String cmdID, String targetNode, String val, IPAddress 
   doc["node"] = targetNode;
   doc["value"] = val;
   doc["status"] = "success"; 
+  
   sendJsonPacket(doc, ip, port, "command_response");
 }
 
-// Helper to serialize and send
 void sendJsonPacket(JsonDocument& doc, IPAddress ip, int port, String label) {
   char buffer[512];
   serializeJson(doc, buffer);
+  Serial.println("[TX] SENDING PACKET");
+  Serial.println("[TX] Type: " + label);
+  Serial.println("[TX] To: " + ip.toString() + ":" + String(port));
+  Serial.println("[TX] Content: " + String(buffer));
   udp.beginPacket(ip, port);
   udp.write((uint8_t*)buffer, strlen(buffer));
   udp.endPacket();
-  Serial.println("Packet Type: " + label);
-  Serial.println("Destination: " + ip.toString() + ":" + String(port));
-  Serial.println("Payload: " + String(buffer));
 }
