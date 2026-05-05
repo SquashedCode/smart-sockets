@@ -95,6 +95,7 @@ devices_lock = threading.Lock()
 menu_layer = "main"
 selected_index = 0
 submenu_index = 0
+device_control_index = 0
 
 main_menu = [
     "Discover Devices",
@@ -710,16 +711,84 @@ def wait_for_button_release(pin):
     while button_pressed(pin):
         time.sleep(0.02)
 
+def get_device_control_options(device):
+    raw = device.get("raw", {})
+    node_l = raw.get("node_l", {})
+    node_r = raw.get("node_r", {})
+
+    options = ["base"]
+
+    if string_true(node_l.get("attached", "false")):
+        options.append("node_l")
+
+    if string_true(node_r.get("attached", "false")):
+        options.append("node_r")
+
+    return options
+
+
+def get_selected_device():
+    with devices_lock:
+        device_list = list(devices.values())
+
+    if not device_list:
+        return None
+
+    index = submenu_index % len(device_list)
+    return device_list[index]
+
+
+def get_current_power_value(device, target):
+    raw = device.get("raw", {})
+
+    if target == "base":
+        return string_true(raw.get("power", raw.get("status_base", "false")))
+
+    node_data = raw.get(target, {})
+    return string_true(node_data.get("power", "false"))
+
+
+def send_menu_power_command(device, target):
+    current_power = get_current_power_value(device, target)
+    new_value = "low" if current_power else "high"
+
+    packet = {
+        "action": "power",
+        "command_id": f"menu_{int(time.time())}",
+        "hub_name": hub_name,
+        "base": clean_lower_string(device.get("name", "")),
+        "node": target,
+        "value": new_value,
+        "port": str(UDP_PORT),
+        "source": "hub_menu"
+    }
+
+    ip = clean_string(device.get("ip", ""))
+
+    if ip and ip != "unknown":
+        print(f"menu command to {device['name']} at {ip}: {target} -> {new_value}")
+        send_udp_message(packet, ip=ip)
+    else:
+        print(f"menu command broadcast for {device['name']}: {target} -> {new_value}")
+        send_udp_message(packet, ip=BROADCAST_IP)
 
 def check_buttons():
     global selected_index
     global submenu_index
     global menu_layer
     global needs_display_update
+    global device_control_index
 
     if button_pressed(BUTTON_UP):
         if menu_layer == "main":
             selected_index = (selected_index - 1) % len(main_menu)
+
+        elif menu_layer == "devices":
+            device = get_selected_device()
+
+            if device:
+                options = get_device_control_options(device)
+                device_control_index = (device_control_index - 1) % len(options)
 
         wait_for_button_release(BUTTON_UP)
         needs_display_update = True
@@ -728,18 +797,41 @@ def check_buttons():
         if menu_layer == "main":
             selected_index = (selected_index + 1) % len(main_menu)
 
+        elif menu_layer == "devices":
+            device = get_selected_device()
+
+            if device:
+                options = get_device_control_options(device)
+                device_control_index = (device_control_index + 1) % len(options)
+
         wait_for_button_release(BUTTON_DOWN)
         needs_display_update = True
 
     elif button_pressed(BUTTON_LEFT):
-        if menu_layer != "main":
+        if menu_layer == "devices":
+            with devices_lock:
+                device_count = len(devices)
+
+            if device_count > 0:
+                submenu_index = (submenu_index - 1) % device_count
+                device_control_index = 0
+
+        elif menu_layer != "main":
             submenu_index = max(0, submenu_index - 1)
 
         wait_for_button_release(BUTTON_LEFT)
         needs_display_update = True
 
     elif button_pressed(BUTTON_RIGHT):
-        if menu_layer != "main":
+        if menu_layer == "devices":
+            with devices_lock:
+                device_count = len(devices)
+
+            if device_count > 0:
+                submenu_index = (submenu_index + 1) % device_count
+                device_control_index = 0
+
+        elif menu_layer != "main":
             submenu_index += 1
 
         wait_for_button_release(BUTTON_RIGHT)
@@ -755,6 +847,7 @@ def check_buttons():
             elif selected_option == "Devices":
                 menu_layer = "devices"
                 submenu_index = 0
+                device_control_index = 0
 
             elif selected_option == "Hub Settings":
                 menu_layer = "settings"
@@ -767,6 +860,14 @@ def check_buttons():
             elif selected_option == "About":
                 menu_layer = "about"
                 submenu_index = 0
+
+        elif menu_layer == "devices":
+            device = get_selected_device()
+
+            if device:
+                options = get_device_control_options(device)
+                target = options[device_control_index % len(options)]
+                send_menu_power_command(device, target)
 
         else:
             menu_layer = "main"
@@ -816,7 +917,6 @@ def draw_main_menu(draw):
         draw.text((20, y), prefix + item, font=item_font, fill=0)
         y += 48
 
-
 def draw_devices_menu(draw):
     title_font = get_font(FONT_HEADER)
     item_font = get_font(FONT_ITEM)
@@ -840,28 +940,37 @@ def draw_devices_menu(draw):
     node_l = raw.get("node_l", {})
     node_r = raw.get("node_r", {})
 
-    draw.text((25, 60), f"Device {index + 1}/{len(device_list)}", font=small_font, fill=0)
-    draw.text((25, 88), f"Name: {device['name']}", font=item_font, fill=0)
-    draw.text((25, 122), f"IP: {device['ip']}", font=item_font, fill=0)
-    draw.text((25, 156), f"Status: {device['status']}", font=item_font, fill=0)
+    options = get_device_control_options(device)
+    selected_target = options[device_control_index % len(options)]
 
-    draw.text(
-        (25, 190),
-        f"L: A={node_l.get('attached')} P={node_l.get('power')}",
-        font=item_font,
-        fill=0
-    )
+    draw.text((25, 56), f"Device {index + 1}/{len(device_list)}", font=small_font, fill=0)
+    draw.text((25, 80), f"Name: {device['name']}", font=small_font, fill=0)
+    draw.text((25, 104), f"IP: {device['ip']}", font=small_font, fill=0)
+    draw.text((25, 128), f"Status: {device['status']}", font=small_font, fill=0)
 
-    draw.text(
-        (25, 224),
-        f"R: A={node_r.get('attached')} P={node_r.get('power')}",
-        font=item_font,
-        fill=0
-    )
+    y = 160
 
-    last_seen = int(time.time() - device["last_seen"])
-    draw.text((25, 258), f"Seen: {last_seen}s   L/R: switch", font=small_font, fill=0)
+    for option in options:
+        prefix = "> " if option == selected_target else "  "
 
+        if option == "base":
+            label = "Base"
+            power = "?"
+        else:
+            node_data = raw.get(option, {})
+            label = option
+            power = "ON" if string_true(node_data.get("power", "false")) else "OFF"
+
+        draw.text(
+            (25, y),
+            f"{prefix}{label}: {power}",
+            font=item_font,
+            fill=0
+        )
+
+        y += 36
+
+    draw.text((25, 258), "L/R: device  U/D: part  SEL: toggle", font=small_font, fill=0)
 
 def draw_settings_menu(draw):
     title_font = get_font(FONT_HEADER)
